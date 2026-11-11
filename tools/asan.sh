@@ -2,6 +2,7 @@
 # AddressSanitizer runs (the memory-safety gate).
 #   tools/asan.sh build              nightly build of the extension with -Zsanitizer=address
 #   tools/asan.sh test [phpunit...]  the PHPUnit suites with that build, under ASan
+#   tools/asan.sh embed [phpunit...] the embedding suite (examples/embedder) under ASan
 #   tools/asan.sh php [args...]      one php process with that build, under ASan
 # Env: PHP / PHP_CONFIG (the PHP to build for and run; default php / php-config), OUT (reports).
 #
@@ -31,8 +32,18 @@ env_run() {
 case $1 in
   build)
     cd "$ROOT" && PHP="$PHP" PHP_CONFIG="$PHP_CONFIG" CARGO_TARGET_DIR="$TD" RUSTFLAGS="-Zsanitizer=address" \
-      cargo +nightly build --profile fast --target "$HOST" -p revolt-ext
+      cargo +nightly build --profile fast --target "$HOST" -p revolt-ext -p revolt-embed-example
     echo "$SO" ;;
+  embed)
+    # the embedding suite (both load orders, fallbacks) with the instrumented builds; the ABI
+    # mismatch cases skip (no instrumented mismatch builds)
+    shift; rm -f "$OUT"/asan.*
+    rc=0
+    REVOLT_EMBED_EXT=$(dirname "$SO")/$(basename "$SO" | sed 's/revolt/revolt_embed_example/') REVOLT_EXT=$SO \
+    PHP="$PHP" EXT=$SO REVOLT_ASAN_RT=$RT REVOLT_ASAN_OPTIONS=detect_leaks=0:abort_on_error=0:halt_on_error=1:log_path=$OUT/asan \
+      "$ROOT/tools/test.sh" --testsuite embedder "$@" || rc=$?
+    if ls "$OUT"/asan.* >/dev/null 2>&1; then echo "ASan reports in $OUT:"; grep -h "ERROR: AddressSanitizer" "$OUT"/asan.* | sort | uniq -c; rc=1; else echo "ASan: no reports"; fi
+    exit $rc ;;
   test)
     shift; rm -f "$OUT"/asan.*
     rc=0
@@ -45,5 +56,5 @@ case $1 in
     exit $rc ;;
   php)
     shift; env_run "$PHP" -n -d extension="$SO" "$@" ;;
-  *) echo "usage: $0 build|test|php"; exit 2 ;;
+  *) echo "usage: $0 build|test|embed|php"; exit 2 ;;
 esac

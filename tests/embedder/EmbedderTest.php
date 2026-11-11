@@ -39,6 +39,11 @@ final class EmbedderTest extends TestCase
         $cmd[] = __DIR__ . '/scenario.php';
         $cmd[] = $scenario;
         $env = \array_merge(\getenv(), ['REVOLT_EMBED_EXAMPLE_NO_REGISTER' => '0', 'REVOLT_EMBED_SCENARIO_PHPLIB' => ''], $env);
+        $asan = (string) \getenv('REVOLT_ASAN_RT');
+        if ($asan !== '') {
+            // tools/asan.sh embed: macOS' dyld does not hand DYLD_* down, so preload it again
+            $env[\PHP_OS_FAMILY === 'Darwin' ? 'DYLD_INSERT_LIBRARIES' : 'LD_PRELOAD'] = $asan;
+        }
         $proc = \proc_open($cmd, [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes, null, $env);
         $out = \stream_get_contents($pipes[1]);
         $err = \stream_get_contents($pipes[2]);

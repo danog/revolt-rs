@@ -162,6 +162,10 @@ jobs:
         run: |
           (cd tests && composer install --no-interaction --no-progress -q)
           tools/asan.sh test
+      - name: Embedding suite under ASan
+        env:
+          REVOLT_TEST_SCAN_DIR: "1"
+        run: tools/asan.sh embed
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
