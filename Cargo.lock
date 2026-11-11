@@ -400,8 +400,6 @@ dependencies = [
 [[package]]
 name = "ext-php-rs-build"
 version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "27fdebdb7e4287ce25231551be917d80281d5befaee335ba9b1b77ffb01a1c6b"
 dependencies = [
  "anyhow",
 ]
