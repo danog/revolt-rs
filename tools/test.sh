@@ -2,7 +2,8 @@
 # Runs a PHPUnit suite of tests/ against the extension (PHP library absent).
 #   tools/test.sh [phpunit args...]          e.g. tools/test.sh --testsuite revolt
 # Env: PHP (default php), EXT (default target/fast/librevolt.{so,dylib}), EXTRA_INI (more ini lines,
-# e.g. "extension=ev" to run EvDriverTest).
+# e.g. "extension=ev" to run EvDriverTest), REVOLT_RS_PHPLIB=1 (the baseline: the PHP library
+# from tools/phplib instead of the extension).
 set -e
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 PHP=${PHP:-php}
@@ -26,6 +27,8 @@ if [ -n "$REVOLT_ASAN_RT" ]; then
 fi
 # an ini of our own (PHPRC: the phpt subprocesses get it too; no scan dir)
 INI=$(mktemp -d)
-printf 'extension=%s\nzend.assertions=1\nassert.exception=1\nmemory_limit=512M\n%s\n' "$EXT" "$EXTRA_INI" > "$INI/php.ini"
+EXTLINE="extension=$EXT"
+[ -n "$REVOLT_RS_PHPLIB" ] && EXTLINE=
+printf '%s\nzend.assertions=1\nassert.exception=1\nmemory_limit=512M\n%s\n' "$EXTLINE" "$EXTRA_INI" > "$INI/php.ini"
 export PHPRC=$INI PHP_INI_SCAN_DIR=
 exec "$PHP" -c "$INI/php.ini" vendor/bin/phpunit "$@"

@@ -13,8 +13,11 @@ use Revolt\EventLoop\Driver\StreamSelectDriver;
  */
 final class NoFdSetSizeLimitTest extends TestCase
 {
+    use NativeOnly;
+
     public function testMoreThanFdSetSizeStreams(): void
     {
+        self::nativeOnly();
         if (\DIRECTORY_SEPARATOR === '\\') {
             self::markTestSkipped('socket pairs of this size are a Unix test');
         }

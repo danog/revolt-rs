@@ -3,8 +3,9 @@
 revolt-rs implements the API and behaviour of revolt/event-loop 1.0.9; revolt/event-loop's own
 test suite passes against it unchanged (except the tests listed in
 [tests/NOT_APPLICABLE.md](tests/NOT_APPLICABLE.md)). This file lists every deliberate difference.
-Each entry names the test of `tests/native` that pins it (entries marked *pin pending* still
-need theirs).
+Each entry names the test of `tests/native` that pins it. Those tests skip in the baseline run
+against the PHP library (`REVOLT_RS_PHPLIB=1 tools/test.sh`); every other test of `tests/native`
+passes on both, so it shows behaviour that is the same.
 
 ## Reflection
 
@@ -20,7 +21,7 @@ need theirs).
   nothing (`isEmpty()` and `callbackId()` work); they are reachable through Reflection only.
 - `EventLoop::setDriver()`'s temporary driver is an instance of the internal class
   `Revolt\EventLoop\Internal\AbstractDriver@anonymous` (PHP's name for it ends with the
-  file and line). *pin pending*
+  file and line). Pinned by `SetDriverTest::testTemporaryDriverClass`.
 
 ## Behaviour
 
@@ -30,42 +31,53 @@ need theirs).
 - **All four driver classes share the native reactor.** EvDriver, EventDriver and UvDriver keep
   `isSupported()` (ext-ev/event/uv loaded), their constructor's requirement of the extension and
   `getHandle()` (an `\EvLoop`, `\EventBase` or uv loop created at construction) — but that
-  handle is not driven by the loop: watchers user code adds to it directly never fire. *pin pending*
+  handle is not driven by the loop: watchers user code adds to it directly never fire. Pinned by
+  `DriverHandleTest`.
 - **Signals without ext-pcntl.** onSignal() works on Unix for every driver class (a sigaction
   handler of the extension); StreamSelectDriver does not need pcntl. When the last callback of a
   signal goes, the disposition the signal had before is restored (revolt/event-loop sets
   SIG_DFL). Registration failures throw `UnsupportedFeatureException("Failed to register signal
   handler; Errno: N; <strerror>")` from the loop, as Revolt's do (the message text differs).
-  Windows: `UnsupportedFeatureException("Signal handling requires the pcntl extension")`. *pin pending*
+  Windows: `UnsupportedFeatureException("Signal handling requires the pcntl extension")`. Pinned
+  by `SignalTest`.
 - **Data in PHP's stream read buffer** makes a readable callback fire at once for every driver
-  class (stream_select does this; ev/event/uv do not). *pin pending*
+  class (stream_select does this; ev/event/uv do not). Pinned by
+  `StreamTest::testBufferedDataIsReadable`.
 - **Streams that are not streams.** A readable/writable callback whose stream is not a valid
   stream resource when it is activated (closed, or not a stream) throws a `TypeError` from the
   loop ("Invalid stream for callback x: ..."); revolt/event-loop fails in stream_select() or an
-  assertion. *pin pending*
+  assertion. Pinned by `StreamTest::testClosedStreamIsTypeError`.
 - **Extra arguments** to the native methods are ignored, as PHP functions ignore them; missing or
   wrongly typed ones throw PHP's internal-function errors (`ArgumentCountError: ... expects
   exactly 2 arguments, 1 given`, `TypeError` with the same wording as for typed PHP functions)
-  instead of the messages of user functions ("Too few arguments to function ..."). *pin pending*
+  instead of the messages of user functions ("Too few arguments to function ..."). Pinned by
+  `ObjectTest::testInternalArgumentErrors`.
 - **Cloning** a driver, a suspension or a TracingDriver throws `Error("Trying to clone an
   uncloneable object of class ...")` (their native state cannot be shared safely); Reflection
-  still reports them cloneable, as the PHP classes are. *pin pending*
+  still reports them cloneable, as the PHP classes are. Pinned by `ObjectTest::testCloneIsRefused`.
 - **`new DriverSuspension(...)`** throws `Error`: suspensions come from `getSuspension()` only.
-  *pin pending*
+  Pinned by `ObjectTest::testSuspensionsComeFromTheDriver`.
 - **A suspension whose fiber was destroyed** (collected while suspended) ignores resume() and
-  throw(); revolt/event-loop resumes `{main}`'s loop with the value instead (its fiber reference
-  is weak and comes back null). *pin pending*
+  throw(). revolt/event-loop resumes `{main}`'s loop with the value instead once its weak
+  reference to the fiber comes back null (after the fiber is freed); while the fiber is being
+  destroyed (a `finally` block of the fiber resuming its own suspension) both ignore it, which
+  `SuspensionTest::testResumeOfDestroyedFiberIsIgnored` checks on both.
 - **`{main}` suspend() while the loop is executing** (from a userland driver's dispatch()
   hook, say) throws `Error("The event loop is already running")`; Revolt's assertion/fiber
-  checks fail differently. *pin pending*
+  checks fail differently. Pinned by `SuspensionTest::testMainSuspendDuringDispatch`.
 - **Interrupt descriptions.** "Interrupt from event loop must throw an exception: ..." and
   UncaughtThrowable messages for exceptions thrown out of fibers resumed by a suspension name
   `Revolt\EventLoop\Internal\DriverSuspension::resume` (or `::throw`) instead of the closure of
-  DriverSuspension.php with its file and line. *pin pending*
+  DriverSuspension.php with its file and line. Pinned by
+  `SuspensionTest::testUncaughtFromResumedFiberNamesResume`.
 - **TracingDriver's wrapper closures** are named `Revolt\EventLoop\Driver\TracingDriver::{closure}`
   in error messages (PHP 8.4+ names Revolt's `{closure:...::defer():NN}`, with a file and line).
+  For the same reason (`EventLoop` is an internal class), the creation traces of
+  `TracingDriver::dump()` have no `EventLoop.php:NN` frame for calls made through the facade.
 - **A PHP subclass of AbstractDriver** that writes to a DriverCallback's public properties
   (`$callback->enabled = false`) changes only that object: the loop keeps its own state, written
   through to the objects it hands out. A subclass that does not call `parent::__construct()`
-  works (revolt/event-loop fails on its uninitialised properties). *pin pending*
-- **Equal timer expirations** fire in creation order (Revolt: heap order, unspecified).
+  works (revolt/event-loop fails on its uninitialised properties). Pinned by
+  `UserlandDriverTest::testCallbackPropertyWritesAreLocal` and `::testWithoutParentConstructor`.
+- **Equal timer expirations** fire in creation order (Revolt: heap order, unspecified). Pinned by
+  `TimerOrderTest`.
