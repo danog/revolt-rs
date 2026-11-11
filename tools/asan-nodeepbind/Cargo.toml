@@ -1,0 +1,14 @@
+[package]
+name = "asan-nodeepbind"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "MIT"
+description = "tools/asan.sh (Linux): a preloaded dlopen() that drops RTLD_DEEPBIND, which ASan refuses"
+
+[lib]
+crate-type = ["cdylib"]
+path = "src/lib.rs"
+
+# not a member of the extension's workspace
+[workspace]

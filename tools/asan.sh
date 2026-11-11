@@ -10,7 +10,9 @@
 # How: the extension is instrumented, PHP is not; ASan's runtime must be in the process from the
 # start, so it is preloaded (DYLD_INSERT_LIBRARIES on macOS, LD_PRELOAD on Linux), and
 # USE_ZEND_ALLOC=0 sends emalloc/efree to the (intercepted) system allocator, so ASan sees every
-# Zend allocation too. ZEND_DONT_UNLOAD_MODULES keeps symbols for the reports.
+# Zend allocation too. ZEND_DONT_UNLOAD_MODULES keeps symbols for the reports. Linux: PHP < 8.5
+# loads extensions with RTLD_DEEPBIND, which ASan refuses: tools/asan-nodeepbind, preloaded
+# ahead of the runtime, drops the flag.
 set -e
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 PHP=$(command -v "${PHP:-php}")
@@ -20,7 +22,7 @@ HOST=$(rustc +"$TOOLCHAIN" -vV | sed -n 's/^host: //p')
 TD=$ROOT/target/asan
 SO_DIR=$TD/$HOST/fast
 case $(uname) in
-  Darwin) SO=$SO_DIR/librevolt.dylib; PRE=DYLD_INSERT_LIBRARIES
+  Darwin) SO=$SO_DIR/librevolt.dylib; PRE=DYLD_INSERT_LIBRARIES; NODEEPBIND=
           RT=$(rustc +"$TOOLCHAIN" --print sysroot)/lib/rustlib/$HOST/lib/librustc-nightly_rt.asan.dylib ;;
   *) SO=$SO_DIR/librevolt.so; PRE=LD_PRELOAD
      # Rust ships the Linux runtime only as a static library (for executables): preload the
@@ -28,21 +30,29 @@ case $(uname) in
      RT=
      for rt in "$(clang -print-file-name="libclang_rt.asan-$(uname -m).so" 2>/dev/null)" "$(gcc -print-file-name=libasan.so 2>/dev/null)"; do
        case $rt in /*) [ -f "$rt" ] && { RT=$(readlink -f "$rt"); break; } ;; esac
-     done ;;
+     done
+     NODEEPBIND=$TD/nodeepbind/release/libasan_nodeepbind.so ;;
 esac
 if [ "$1" != build ] && [ ! -f "$RT" ]; then
   echo "no shared ASan runtime found (Linux: install clang's compiler-rt or gcc's libasan)" >&2; exit 1
 fi
 OUT=${OUT:-$ROOT/target/asan-results}
 mkdir -p "$OUT"
+ASAN_OPTS=detect_leaks=0:abort_on_error=0:halt_on_error=1:log_path=$OUT/asan
+if [ -n "$NODEEPBIND" ]; then
+  # the runtime is not first in the preload list: its check of that is turned off
+  RT=$NODEEPBIND:$RT ASAN_OPTS=$ASAN_OPTS:verify_asan_link_order=0
+fi
 env_run() {
-  env $PRE="$RT" USE_ZEND_ALLOC=0 ZEND_DONT_UNLOAD_MODULES=1 \
-    ASAN_OPTIONS=detect_leaks=0:abort_on_error=0:halt_on_error=1:log_path=$OUT/asan "$@"
+  env $PRE="$RT" USE_ZEND_ALLOC=0 ZEND_DONT_UNLOAD_MODULES=1 ASAN_OPTIONS=$ASAN_OPTS "$@"
 }
 case $1 in
   build)
     cd "$ROOT" && PHP="$PHP" PHP_CONFIG="$PHP_CONFIG" CARGO_TARGET_DIR="$TD" RUSTFLAGS="-Zsanitizer=address" \
       cargo +"$TOOLCHAIN" build --profile fast --target "$HOST" -p revolt-ext -p revolt-embed-example
+    if [ -n "$NODEEPBIND" ]; then
+      CARGO_TARGET_DIR="$TD/nodeepbind" cargo +"$TOOLCHAIN" build --release --manifest-path tools/asan-nodeepbind/Cargo.toml
+    fi
     echo "$SO" ;;
   embed)
     # the embedding suite (both load orders, fallbacks) with the instrumented builds; the ABI
@@ -50,14 +60,14 @@ case $1 in
     shift; rm -f "$OUT"/asan.*
     rc=0
     REVOLT_EMBED_EXT=$(dirname "$SO")/$(basename "$SO" | sed 's/revolt/revolt_embed_example/') REVOLT_EXT=$SO \
-    PHP="$PHP" EXT=$SO REVOLT_ASAN_RT=$RT REVOLT_ASAN_OPTIONS=detect_leaks=0:abort_on_error=0:halt_on_error=1:log_path=$OUT/asan \
+    PHP="$PHP" EXT=$SO REVOLT_ASAN_RT=$RT REVOLT_ASAN_OPTIONS=$ASAN_OPTS \
       "$ROOT/tools/test.sh" --testsuite embedder "$@" || rc=$?
     if ls "$OUT"/asan.* >/dev/null 2>&1; then echo "ASan reports in $OUT:"; grep -h "ERROR: AddressSanitizer" "$OUT"/asan.* | sort | uniq -c; rc=1; else echo "ASan: no reports"; fi
     exit $rc ;;
   test)
     shift; rm -f "$OUT"/asan.*
     rc=0
-    PHP="$PHP" EXT=$SO REVOLT_ASAN_RT=$RT REVOLT_ASAN_OPTIONS=detect_leaks=0:abort_on_error=0:halt_on_error=1:log_path=$OUT/asan \
+    PHP="$PHP" EXT=$SO REVOLT_ASAN_RT=$RT REVOLT_ASAN_OPTIONS=$ASAN_OPTS \
       "$ROOT/tools/test.sh" "$@" || rc=$?
     # macOS: phpt subprocesses start through /bin/sh, which drops DYLD_*: their "interceptors not
     # working" aborts are not reports (they run under ASan on Linux)
