@@ -112,7 +112,9 @@ tools/asan.sh build && tools/asan.sh test    # AddressSanitizer (nightly Rust); 
 ```
 
 `tests/revolt` is revolt/event-loop's suite, unchanged; [tests/NOT_APPLICABLE.md](tests/NOT_APPLICABLE.md)
-lists the test that cannot apply and why. `tests/native` holds ours: one test per divergence
+lists the test that cannot apply and why; [tests/ci-excluded](tests/ci-excluded) the timing tests
+excluded on the macOS and Windows CI runners only (their timers break them for the PHP library
+too; `REVOLT_TEST_CI_EXCLUDE=macos|windows`). `tests/native` holds ours: one test per divergence
 (skipped against the PHP library) and robustness tests (userland drivers, GC of cycles through
 the loop, fork, shutdown, exit() in callbacks) that pass on both.
 

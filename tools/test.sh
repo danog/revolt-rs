@@ -4,7 +4,9 @@
 # Env: PHP (default php), EXT (default target/fast/librevolt.{so,dylib}), EXTRA_INI (more ini lines,
 # e.g. "extension=ev" to run EvDriverTest), REVOLT_RS_PHPLIB=1 (the baseline: the PHP library
 # from tools/phplib instead of the extension), REVOLT_TEST_SCAN_DIR=1 (keep the extensions of PHP's
-# own configuration: its ini scan dir and the extension lines of its php.ini).
+# own configuration: its ini scan dir and the extension lines of its php.ini),
+# REVOLT_TEST_CI_EXCLUDE=<name> (CI only: also exclude the tests of tests/ci-excluded/<name>.md,
+# the ones a CI runner's timers break, for the PHP library too).
 set -e
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 PHP=${PHP:-php}
@@ -13,11 +15,17 @@ if [ -z "$EXT" ]; then
   [ -f "$EXT" ] || EXT=$ROOT/target/fast/librevolt.dylib
 fi
 cd "$ROOT/tests"
-# the NOT_APPLICABLE tests are excluded unless a --filter is given
+# the NOT_APPLICABLE tests (and the CI's excluded ones) are excluded unless a --filter is given;
+# a list entry is the end of a test name: `Class::method` or `::method` (every class)
 case " $* " in
   *" --filter "*) ;;
   *)
-    na=$(sed -n 's/^- `\([^`]*\)`.*/\1/p' NOT_APPLICABLE.md | sed 's/\\/\\\\/g' | paste -sd'|' -)
+    lists=NOT_APPLICABLE.md
+    if [ -n "$REVOLT_TEST_CI_EXCLUDE" ]; then
+      [ -f "ci-excluded/$REVOLT_TEST_CI_EXCLUDE.md" ] || { echo "no tests/ci-excluded/$REVOLT_TEST_CI_EXCLUDE.md" >&2; exit 1; }
+      lists="$lists ci-excluded/$REVOLT_TEST_CI_EXCLUDE.md"
+    fi
+    na=$(sed -n 's/^- `\([^`]*\)`.*/\1/p' $lists | sed 's/\\/\\\\/g' | paste -sd'|' -)
     [ -n "$na" ] && set -- --filter "/^(?!.*($na)( |$)).*$/" "$@"
     ;;
 esac
