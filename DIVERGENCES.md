@@ -13,12 +13,15 @@ passes on both, so it shows behaviour that is the same.
   comments or attributes (`#[\Override]`); constructor parameters are not "promoted". Everything
   else Reflection shows (names, modifiers, types, defaults, constants, parents, interfaces) is
   identical: `tools/dump-api.php diff` against the PHP library, on every PHP version in CI.
+  Pinned by `ReflectionTest::testClassesAreInternal`.
 - The private properties of the PHP classes are declared (Reflection lists them) but the native
   classes keep their state in Rust: they stay at their defaults/uninitialised. Exceptions:
   `EventLoop::$driver` (written by setDriver()), the DriverCallback properties, TimerQueue's
   arrays, FiberLocal's `$initializer` and InvalidCallbackError's properties, which are real.
+  Pinned by `ReflectionTest::testPrivateStateStaysAtDefaults`.
 - The private methods (`tick()`, `invokeCallbacks()`, `selectStreams()`, ...) exist but do
   nothing (`isEmpty()` and `callbackId()` work); they are reachable through Reflection only.
+  Pinned by `ReflectionTest::testPrivateMethodsDoNothing`.
 - `EventLoop::setDriver()`'s temporary driver is an instance of the internal class
   `Revolt\EventLoop\Internal\AbstractDriver@anonymous` (PHP's name for it ends with the
   file and line). Pinned by `SetDriverTest::testTemporaryDriverClass`.
@@ -74,6 +77,8 @@ passes on both, so it shows behaviour that is the same.
   in error messages (PHP 8.4+ names Revolt's `{closure:...::defer():NN}`, with a file and line).
   For the same reason (`EventLoop` is an internal class), the creation traces of
   `TracingDriver::dump()` have no `EventLoop.php:NN` frame for calls made through the facade.
+  Pinned by `TracingDriverDumpTest::testWrapperClosureName` and
+  `::testDumpThroughFacadeHasNoEventLoopFrame`.
 - **A PHP subclass of AbstractDriver** that writes to a DriverCallback's public properties
   (`$callback->enabled = false`) changes only that object: the loop keeps its own state, written
   through to the objects it hands out. A subclass that does not call `parent::__construct()`
