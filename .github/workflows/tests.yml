@@ -210,7 +210,9 @@ jobs:
       # the phpize/configure/make path PIE takes when no pre-built binary matches
       - name: pie build
         run: |
-          pie repository:add path "$PWD"
+          # from what a release's source archive holds (.gitattributes export-ignore)
+          mkdir ../archive && git archive HEAD | tar -x -C ../archive
+          pie repository:add path "$(cd ../archive && pwd)"
           pie build 'danog/revolt-rs:*@dev' | tee pie.log
           so=$(sed -n 's/^Build complete: //p' pie.log | tail -1)
           test -f "$so"
