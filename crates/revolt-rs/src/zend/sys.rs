@@ -5,6 +5,11 @@
 
 pub use ext_php_rs::ffi::*;
 
+// Windows: data exported by php8.dll is only reachable through its import library's `__imp_`
+// symbols, which rustc uses for statics of an extern block linked to that library (as
+// ext-php-rs's bindings are).
+#[cfg_attr(all(windows, not(php_zts)), link(name = "php8"))]
+#[cfg_attr(all(windows, php_zts), link(name = "php8ts"))]
 extern "C" {
     pub static mut zend_ce_closure: *mut zend_class_entry;
     pub static mut zend_empty_string: *mut zend_string;
