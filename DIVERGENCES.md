@@ -78,7 +78,7 @@ passes on both, so it shows behaviour that is the same.
   For the same reason (`EventLoop` is an internal class), the creation traces of
   `TracingDriver::dump()` have no `EventLoop.php:NN` frame for calls made through the facade.
   Pinned by `TracingDriverDumpTest::testWrapperClosureName` and
-  `::testDumpThroughFacadeHasNoEventLoopFrame`.
+  `SetDriverTest::testDumpThroughFacadeHasNoEventLoopFrame`.
 - **A PHP subclass of AbstractDriver** that writes to a DriverCallback's public properties
   (`$callback->enabled = false`) changes only that object: the loop keeps its own state, written
   through to the objects it hands out. A subclass that does not call `parent::__construct()`
