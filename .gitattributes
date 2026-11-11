@@ -1,0 +1,4 @@
+# not needed to build: kept out of the source archives PIE downloads
+/tests export-ignore
+/tools export-ignore
+/examples export-ignore

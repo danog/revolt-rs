@@ -1,0 +1,34 @@
+[package]
+name = "revolt-ext"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "MIT"
+repository = "https://github.com/danog/revolt-rs"
+description = "The revolt PHP extension: revolt/event-loop implemented natively in Rust"
+
+[lib]
+# the PHP extension: revolt.so
+name = "revolt"
+crate-type = ["cdylib"]
+path = "src/lib.rs"
+
+[dependencies]
+revolt-rs = { path = "crates/revolt-rs" }
+
+[workspace]
+members = ["crates/revolt-rs", "examples/embedder"]
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "unwind"
+debug = 1
+
+# quicker builds for test iterations (target/fast/librevolt.{so,dylib})
+[profile.fast]
+inherits = "release"
+lto = false
+codegen-units = 16
+incremental = true

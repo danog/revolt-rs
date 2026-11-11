@@ -1,0 +1,26 @@
+{
+    "name": "danog/revolt-rs",
+    "type": "php-ext",
+    "description": "revolt/event-loop implemented natively in Rust: a drop-in, faster event loop for Amp v3 and anything on Revolt",
+    "keywords": ["event-loop", "async", "fiber", "revolt", "amphp", "extension"],
+    "homepage": "https://github.com/danog/revolt-rs",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Daniil Gentili",
+            "email": "daniil@daniil.it"
+        }
+    ],
+    "require": {
+        "php": ">=8.2 <8.7"
+    },
+    "provide": {
+        "revolt/event-loop": "1.0.9"
+    },
+    "php-ext": {
+        "extension-name": "revolt",
+        "support-zts": true,
+        "support-nts": true,
+        "download-url-method": ["pre-packaged-binary", "composer-default"]
+    }
+}

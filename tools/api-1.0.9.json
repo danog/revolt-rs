@@ -1,0 +1,4490 @@
+{
+    "php": "8.5",
+    "classes": {
+        "Revolt\\EventLoop": {
+            "kind": "class",
+            "modifiers": "final",
+            "final": true,
+            "abstract": false,
+            "readonly": false,
+            "instantiable": false,
+            "cloneable": true,
+            "parent": null,
+            "interfaces": [],
+            "backed": null,
+            "constants": [],
+            "properties": {
+                "driver": {
+                    "type": "Revolt\\EventLoop\\Driver",
+                    "modifiers": "private static",
+                    "readonly": false,
+                    "static": true,
+                    "has_default": false,
+                    "default": null
+                }
+            },
+            "methods": {
+                "__construct": {
+                    "modifiers": "private",
+                    "params": [],
+                    "return": null,
+                    "tentative": null,
+                    "required": 0,
+                    "byref_return": false,
+                    "constructor": true
+                },
+                "cancel": {
+                    "modifiers": "public static",
+                    "params": [
+                        {
+                            "name": "callbackId",
+                            "type": "string",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "void",
+                    "tentative": null,
+                    "required": 1,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "defer": {
+                    "modifiers": "public static",
+                    "params": [
+                        {
+                            "name": "closure",
+                            "type": "Closure",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "string",
+                    "tentative": null,
+                    "required": 1,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "delay": {
+                    "modifiers": "public static",
+                    "params": [
+                        {
+                            "name": "delay",
+                            "type": "float",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        },
+                        {
+                            "name": "closure",
+                            "type": "Closure",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "string",
+                    "tentative": null,
+                    "required": 2,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "disable": {
+                    "modifiers": "public static",
+                    "params": [
+                        {
+                            "name": "callbackId",
+                            "type": "string",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "string",
+                    "tentative": null,
+                    "required": 1,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "enable": {
+                    "modifiers": "public static",
+                    "params": [
+                        {
+                            "name": "callbackId",
+                            "type": "string",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "string",
+                    "tentative": null,
+                    "required": 1,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "getDriver": {
+                    "modifiers": "public static",
+                    "params": [],
+                    "return": "Revolt\\EventLoop\\Driver",
+                    "tentative": null,
+                    "required": 0,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "getErrorHandler": {
+                    "modifiers": "public static",
+                    "params": [],
+                    "return": "?Closure",
+                    "tentative": null,
+                    "required": 0,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "getIdentifiers": {
+                    "modifiers": "public static",
+                    "params": [],
+                    "return": "array",
+                    "tentative": null,
+                    "required": 0,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "getSuspension": {
+                    "modifiers": "public static",
+                    "params": [],
+                    "return": "Revolt\\EventLoop\\Suspension",
+                    "tentative": null,
+                    "required": 0,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "getType": {
+                    "modifiers": "public static",
+                    "params": [
+                        {
+                            "name": "callbackId",
+                            "type": "string",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "Revolt\\EventLoop\\CallbackType",
+                    "tentative": null,
+                    "required": 1,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "isEnabled": {
+                    "modifiers": "public static",
+                    "params": [
+                        {
+                            "name": "callbackId",
+                            "type": "string",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "bool",
+                    "tentative": null,
+                    "required": 1,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "isReferenced": {
+                    "modifiers": "public static",
+                    "params": [
+                        {
+                            "name": "callbackId",
+                            "type": "string",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "bool",
+                    "tentative": null,
+                    "required": 1,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "onReadable": {
+                    "modifiers": "public static",
+                    "params": [
+                        {
+                            "name": "stream",
+                            "type": "mixed",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        },
+                        {
+                            "name": "closure",
+                            "type": "Closure",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "string",
+                    "tentative": null,
+                    "required": 2,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "onSignal": {
+                    "modifiers": "public static",
+                    "params": [
+                        {
+                            "name": "signal",
+                            "type": "int",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        },
+                        {
+                            "name": "closure",
+                            "type": "Closure",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "string",
+                    "tentative": null,
+                    "required": 2,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "onWritable": {
+                    "modifiers": "public static",
+                    "params": [
+                        {
+                            "name": "stream",
+                            "type": "mixed",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        },
+                        {
+                            "name": "closure",
+                            "type": "Closure",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "string",
+                    "tentative": null,
+                    "required": 2,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "queue": {
+                    "modifiers": "public static",
+                    "params": [
+                        {
+                            "name": "closure",
+                            "type": "Closure",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        },
+                        {
+                            "name": "args",
+                            "type": "mixed",
+                            "optional": true,
+                            "byref": false,
+                            "variadic": true,
+                            "default": null
+                        }
+                    ],
+                    "return": "void",
+                    "tentative": null,
+                    "required": 1,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "reference": {
+                    "modifiers": "public static",
+                    "params": [
+                        {
+                            "name": "callbackId",
+                            "type": "string",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "string",
+                    "tentative": null,
+                    "required": 1,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "repeat": {
+                    "modifiers": "public static",
+                    "params": [
+                        {
+                            "name": "interval",
+                            "type": "float",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        },
+                        {
+                            "name": "closure",
+                            "type": "Closure",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "string",
+                    "tentative": null,
+                    "required": 2,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "run": {
+                    "modifiers": "public static",
+                    "params": [],
+                    "return": "void",
+                    "tentative": null,
+                    "required": 0,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "setDriver": {
+                    "modifiers": "public static",
+                    "params": [
+                        {
+                            "name": "driver",
+                            "type": "Revolt\\EventLoop\\Driver",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "void",
+                    "tentative": null,
+                    "required": 1,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "setErrorHandler": {
+                    "modifiers": "public static",
+                    "params": [
+                        {
+                            "name": "errorHandler",
+                            "type": "?Closure",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "void",
+                    "tentative": null,
+                    "required": 1,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "unreference": {
+                    "modifiers": "public static",
+                    "params": [
+                        {
+                            "name": "callbackId",
+                            "type": "string",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "string",
+                    "tentative": null,
+                    "required": 1,
+                    "byref_return": false,
+                    "constructor": false
+                }
+            }
+        },
+        "Revolt\\EventLoop\\CallbackType": {
+            "kind": "enum",
+            "modifiers": "final",
+            "final": true,
+            "abstract": false,
+            "readonly": false,
+            "instantiable": false,
+            "cloneable": false,
+            "parent": null,
+            "interfaces": [
+                "UnitEnum"
+            ],
+            "backed": false,
+            "constants": {
+                "Defer": {
+                    "value": "Revolt\\EventLoop\\CallbackType::Defer",
+                    "modifiers": "public",
+                    "case": true,
+                    "type": null
+                },
+                "Delay": {
+                    "value": "Revolt\\EventLoop\\CallbackType::Delay",
+                    "modifiers": "public",
+                    "case": true,
+                    "type": null
+                },
+                "Readable": {
+                    "value": "Revolt\\EventLoop\\CallbackType::Readable",
+                    "modifiers": "public",
+                    "case": true,
+                    "type": null
+                },
+                "Repeat": {
+                    "value": "Revolt\\EventLoop\\CallbackType::Repeat",
+                    "modifiers": "public",
+                    "case": true,
+                    "type": null
+                },
+                "Signal": {
+                    "value": "Revolt\\EventLoop\\CallbackType::Signal",
+                    "modifiers": "public",
+                    "case": true,
+                    "type": null
+                },
+                "Writable": {
+                    "value": "Revolt\\EventLoop\\CallbackType::Writable",
+                    "modifiers": "public",
+                    "case": true,
+                    "type": null
+                }
+            },
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "modifiers": "public protected(set) readonly",
+                    "readonly": true,
+                    "static": false,
+                    "has_default": false,
+                    "default": null
+                }
+            },
+            "methods": {
+                "cases": {
+                    "modifiers": "public static",
+                    "params": [],
+                    "return": "array",
+                    "tentative": null,
+                    "required": 0,
+                    "byref_return": false,
+                    "constructor": false
+                }
+            }
+        },
+        "Revolt\\EventLoop\\Driver": {
+            "kind": "interface",
+            "modifiers": "",
+            "final": false,
+            "abstract": true,
+            "readonly": false,
+            "instantiable": false,
+            "cloneable": false,
+            "parent": null,
+            "interfaces": [],
+            "backed": null,
+            "constants": [],
+            "properties": [],
+            "methods": {
+                "__debugInfo": {
+                    "modifiers": "abstract public",
+                    "params": [],
+                    "return": "array",
+                    "tentative": null,
+                    "required": 0,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "cancel": {
+                    "modifiers": "abstract public",
+                    "params": [
+                        {
+                            "name": "callbackId",
+                            "type": "string",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "void",
+                    "tentative": null,
+                    "required": 1,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "defer": {
+                    "modifiers": "abstract public",
+                    "params": [
+                        {
+                            "name": "closure",
+                            "type": "Closure",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "string",
+                    "tentative": null,
+                    "required": 1,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "delay": {
+                    "modifiers": "abstract public",
+                    "params": [
+                        {
+                            "name": "delay",
+                            "type": "float",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        },
+                        {
+                            "name": "closure",
+                            "type": "Closure",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "string",
+                    "tentative": null,
+                    "required": 2,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "disable": {
+                    "modifiers": "abstract public",
+                    "params": [
+                        {
+                            "name": "callbackId",
+                            "type": "string",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "string",
+                    "tentative": null,
+                    "required": 1,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "enable": {
+                    "modifiers": "abstract public",
+                    "params": [
+                        {
+                            "name": "callbackId",
+                            "type": "string",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "string",
+                    "tentative": null,
+                    "required": 1,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "getErrorHandler": {
+                    "modifiers": "abstract public",
+                    "params": [],
+                    "return": "?Closure",
+                    "tentative": null,
+                    "required": 0,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "getHandle": {
+                    "modifiers": "abstract public",
+                    "params": [],
+                    "return": "mixed",
+                    "tentative": null,
+                    "required": 0,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "getIdentifiers": {
+                    "modifiers": "abstract public",
+                    "params": [],
+                    "return": "array",
+                    "tentative": null,
+                    "required": 0,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "getSuspension": {
+                    "modifiers": "abstract public",
+                    "params": [],
+                    "return": "Revolt\\EventLoop\\Suspension",
+                    "tentative": null,
+                    "required": 0,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "getType": {
+                    "modifiers": "abstract public",
+                    "params": [
+                        {
+                            "name": "callbackId",
+                            "type": "string",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "Revolt\\EventLoop\\CallbackType",
+                    "tentative": null,
+                    "required": 1,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "isEnabled": {
+                    "modifiers": "abstract public",
+                    "params": [
+                        {
+                            "name": "callbackId",
+                            "type": "string",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "bool",
+                    "tentative": null,
+                    "required": 1,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "isReferenced": {
+                    "modifiers": "abstract public",
+                    "params": [
+                        {
+                            "name": "callbackId",
+                            "type": "string",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "bool",
+                    "tentative": null,
+                    "required": 1,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "isRunning": {
+                    "modifiers": "abstract public",
+                    "params": [],
+                    "return": "bool",
+                    "tentative": null,
+                    "required": 0,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "onReadable": {
+                    "modifiers": "abstract public",
+                    "params": [
+                        {
+                            "name": "stream",
+                            "type": "mixed",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        },
+                        {
+                            "name": "closure",
+                            "type": "Closure",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "string",
+                    "tentative": null,
+                    "required": 2,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "onSignal": {
+                    "modifiers": "abstract public",
+                    "params": [
+                        {
+                            "name": "signal",
+                            "type": "int",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        },
+                        {
+                            "name": "closure",
+                            "type": "Closure",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "string",
+                    "tentative": null,
+                    "required": 2,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "onWritable": {
+                    "modifiers": "abstract public",
+                    "params": [
+                        {
+                            "name": "stream",
+                            "type": "mixed",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        },
+                        {
+                            "name": "closure",
+                            "type": "Closure",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "string",
+                    "tentative": null,
+                    "required": 2,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "queue": {
+                    "modifiers": "abstract public",
+                    "params": [
+                        {
+                            "name": "closure",
+                            "type": "Closure",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        },
+                        {
+                            "name": "args",
+                            "type": "mixed",
+                            "optional": true,
+                            "byref": false,
+                            "variadic": true,
+                            "default": null
+                        }
+                    ],
+                    "return": "void",
+                    "tentative": null,
+                    "required": 1,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "reference": {
+                    "modifiers": "abstract public",
+                    "params": [
+                        {
+                            "name": "callbackId",
+                            "type": "string",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "string",
+                    "tentative": null,
+                    "required": 1,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "repeat": {
+                    "modifiers": "abstract public",
+                    "params": [
+                        {
+                            "name": "interval",
+                            "type": "float",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        },
+                        {
+                            "name": "closure",
+                            "type": "Closure",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "string",
+                    "tentative": null,
+                    "required": 2,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "run": {
+                    "modifiers": "abstract public",
+                    "params": [],
+                    "return": "void",
+                    "tentative": null,
+                    "required": 0,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "setErrorHandler": {
+                    "modifiers": "abstract public",
+                    "params": [
+                        {
+                            "name": "errorHandler",
+                            "type": "?Closure",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "void",
+                    "tentative": null,
+                    "required": 1,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "stop": {
+                    "modifiers": "abstract public",
+                    "params": [],
+                    "return": "void",
+                    "tentative": null,
+                    "required": 0,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "unreference": {
+                    "modifiers": "abstract public",
+                    "params": [
+                        {
+                            "name": "callbackId",
+                            "type": "string",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "string",
+                    "tentative": null,
+                    "required": 1,
+                    "byref_return": false,
+                    "constructor": false
+                }
+            }
+        },
+        "Revolt\\EventLoop\\DriverFactory": {
+            "kind": "class",
+            "modifiers": "final",
+            "final": true,
+            "abstract": false,
+            "readonly": false,
+            "instantiable": true,
+            "cloneable": true,
+            "parent": null,
+            "interfaces": [],
+            "backed": null,
+            "constants": [],
+            "properties": [],
+            "methods": {
+                "create": {
+                    "modifiers": "public",
+                    "params": [],
+                    "return": "Revolt\\EventLoop\\Driver",
+                    "tentative": null,
+                    "required": 0,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "createDriverFromEnv": {
+                    "modifiers": "private",
+                    "params": [],
+                    "return": "?Revolt\\EventLoop\\Driver",
+                    "tentative": null,
+                    "required": 0,
+                    "byref_return": false,
+                    "constructor": false
+                }
+            }
+        },
+        "Revolt\\EventLoop\\Driver\\EvDriver": {
+            "kind": "class",
+            "modifiers": "final",
+            "final": true,
+            "abstract": false,
+            "readonly": false,
+            "instantiable": true,
+            "cloneable": true,
+            "parent": "Revolt\\EventLoop\\Internal\\AbstractDriver",
+            "interfaces": [
+                "Revolt\\EventLoop\\Driver"
+            ],
+            "backed": null,
+            "constants": [],
+            "properties": {
+                "activeSignals": {
+                    "type": "?array",
+                    "modifiers": "private static",
+                    "readonly": false,
+                    "static": true,
+                    "has_default": true,
+                    "default": "NULL"
+                },
+                "events": {
+                    "type": "array",
+                    "modifiers": "private",
+                    "readonly": false,
+                    "static": false,
+                    "has_default": true,
+                    "default": "array (\n)"
+                },
+                "handle": {
+                    "type": "EvLoop",
+                    "modifiers": "private",
+                    "readonly": false,
+                    "static": false,
+                    "has_default": false,
+                    "default": null
+                },
+                "ioCallback": {
+                    "type": "Closure",
+                    "modifiers": "private readonly",
+                    "readonly": true,
+                    "static": false,
+                    "has_default": false,
+                    "default": null
+                },
+                "signalCallback": {
+                    "type": "Closure",
+                    "modifiers": "private readonly",
+                    "readonly": true,
+                    "static": false,
+                    "has_default": false,
+                    "default": null
+                },
+                "signals": {
+                    "type": "array",
+                    "modifiers": "private",
+                    "readonly": false,
+                    "static": false,
+                    "has_default": true,
+                    "default": "array (\n)"
+                },
+                "timerCallback": {
+                    "type": "Closure",
+                    "modifiers": "private readonly",
+                    "readonly": true,
+                    "static": false,
+                    "has_default": false,
+                    "default": null
+                }
+            },
+            "methods": {
+                "__construct": {
+                    "modifiers": "public",
+                    "params": [],
+                    "return": null,
+                    "tentative": null,
+                    "required": 0,
+                    "byref_return": false,
+                    "constructor": true
+                },
+                "__destruct": {
+                    "modifiers": "public",
+                    "params": [],
+                    "return": null,
+                    "tentative": null,
+                    "required": 0,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "activate": {
+                    "modifiers": "protected",
+                    "params": [
+                        {
+                            "name": "callbacks",
+                            "type": "array",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "void",
+                    "tentative": null,
+                    "required": 1,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "cancel": {
+                    "modifiers": "public",
+                    "params": [
+                        {
+                            "name": "callbackId",
+                            "type": "string",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "void",
+                    "tentative": null,
+                    "required": 1,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "deactivate": {
+                    "modifiers": "protected",
+                    "params": [
+                        {
+                            "name": "callback",
+                            "type": "Revolt\\EventLoop\\Internal\\DriverCallback",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "void",
+                    "tentative": null,
+                    "required": 1,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "dispatch": {
+                    "modifiers": "protected",
+                    "params": [
+                        {
+                            "name": "blocking",
+                            "type": "bool",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "void",
+                    "tentative": null,
+                    "required": 1,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "getHandle": {
+                    "modifiers": "public",
+                    "params": [],
+                    "return": "EvLoop",
+                    "tentative": null,
+                    "required": 0,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "isSupported": {
+                    "modifiers": "public static",
+                    "params": [],
+                    "return": "bool",
+                    "tentative": null,
+                    "required": 0,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "now": {
+                    "modifiers": "protected",
+                    "params": [],
+                    "return": "float",
+                    "tentative": null,
+                    "required": 0,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "run": {
+                    "modifiers": "public",
+                    "params": [],
+                    "return": "void",
+                    "tentative": null,
+                    "required": 0,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "stop": {
+                    "modifiers": "public",
+                    "params": [],
+                    "return": "void",
+                    "tentative": null,
+                    "required": 0,
+                    "byref_return": false,
+                    "constructor": false
+                }
+            }
+        },
+        "Revolt\\EventLoop\\Driver\\EventDriver": {
+            "kind": "class",
+            "modifiers": "final",
+            "final": true,
+            "abstract": false,
+            "readonly": false,
+            "instantiable": true,
+            "cloneable": true,
+            "parent": "Revolt\\EventLoop\\Internal\\AbstractDriver",
+            "interfaces": [
+                "Revolt\\EventLoop\\Driver"
+            ],
+            "backed": null,
+            "constants": [],
+            "properties": {
+                "activeSignals": {
+                    "type": "?array",
+                    "modifiers": "private static",
+                    "readonly": false,
+                    "static": true,
+                    "has_default": true,
+                    "default": "NULL"
+                },
+                "events": {
+                    "type": "array",
+                    "modifiers": "private",
+                    "readonly": false,
+                    "static": false,
+                    "has_default": true,
+                    "default": "array (\n)"
+                },
+                "handle": {
+                    "type": "EventBase",
+                    "modifiers": "private",
+                    "readonly": false,
+                    "static": false,
+                    "has_default": false,
+                    "default": null
+                },
+                "ioCallback": {
+                    "type": "Closure",
+                    "modifiers": "private readonly",
+                    "readonly": true,
+                    "static": false,
+                    "has_default": false,
+                    "default": null
+                },
+                "signalCallback": {
+                    "type": "Closure",
+                    "modifiers": "private readonly",
+                    "readonly": true,
+                    "static": false,
+                    "has_default": false,
+                    "default": null
+                },
+                "signals": {
+                    "type": "array",
+                    "modifiers": "private",
+                    "readonly": false,
+                    "static": false,
+                    "has_default": true,
+                    "default": "array (\n)"
+                },
+                "timerCallback": {
+                    "type": "Closure",
+                    "modifiers": "private readonly",
+                    "readonly": true,
+                    "static": false,
+                    "has_default": false,
+                    "default": null
+                }
+            },
+            "methods": {
+                "__construct": {
+                    "modifiers": "public",
+                    "params": [],
+                    "return": null,
+                    "tentative": null,
+                    "required": 0,
+                    "byref_return": false,
+                    "constructor": true
+                },
+                "__destruct": {
+                    "modifiers": "public",
+                    "params": [],
+                    "return": null,
+                    "tentative": null,
+                    "required": 0,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "activate": {
+                    "modifiers": "protected",
+                    "params": [
+                        {
+                            "name": "callbacks",
+                            "type": "array",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "void",
+                    "tentative": null,
+                    "required": 1,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "cancel": {
+                    "modifiers": "public",
+                    "params": [
+                        {
+                            "name": "callbackId",
+                            "type": "string",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "void",
+                    "tentative": null,
+                    "required": 1,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "deactivate": {
+                    "modifiers": "protected",
+                    "params": [
+                        {
+                            "name": "callback",
+                            "type": "Revolt\\EventLoop\\Internal\\DriverCallback",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "void",
+                    "tentative": null,
+                    "required": 1,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "dispatch": {
+                    "modifiers": "protected",
+                    "params": [
+                        {
+                            "name": "blocking",
+                            "type": "bool",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "void",
+                    "tentative": null,
+                    "required": 1,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "getHandle": {
+                    "modifiers": "public",
+                    "params": [],
+                    "return": "EventBase",
+                    "tentative": null,
+                    "required": 0,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "isSupported": {
+                    "modifiers": "public static",
+                    "params": [],
+                    "return": "bool",
+                    "tentative": null,
+                    "required": 0,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "now": {
+                    "modifiers": "protected",
+                    "params": [],
+                    "return": "float",
+                    "tentative": null,
+                    "required": 0,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "run": {
+                    "modifiers": "public",
+                    "params": [],
+                    "return": "void",
+                    "tentative": null,
+                    "required": 0,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "stop": {
+                    "modifiers": "public",
+                    "params": [],
+                    "return": "void",
+                    "tentative": null,
+                    "required": 0,
+                    "byref_return": false,
+                    "constructor": false
+                }
+            }
+        },
+        "Revolt\\EventLoop\\Driver\\StreamSelectDriver": {
+            "kind": "class",
+            "modifiers": "final",
+            "final": true,
+            "abstract": false,
+            "readonly": false,
+            "instantiable": true,
+            "cloneable": true,
+            "parent": "Revolt\\EventLoop\\Internal\\AbstractDriver",
+            "interfaces": [
+                "Revolt\\EventLoop\\Driver"
+            ],
+            "backed": null,
+            "constants": [],
+            "properties": {
+                "readCallbacks": {
+                    "type": "array",
+                    "modifiers": "private",
+                    "readonly": false,
+                    "static": false,
+                    "has_default": true,
+                    "default": "array (\n)"
+                },
+                "readStreams": {
+                    "type": "array",
+                    "modifiers": "private",
+                    "readonly": false,
+                    "static": false,
+                    "has_default": true,
+                    "default": "array (\n)"
+                },
+                "signalCallbacks": {
+                    "type": "array",
+                    "modifiers": "private",
+                    "readonly": false,
+                    "static": false,
+                    "has_default": true,
+                    "default": "array (\n)"
+                },
+                "signalHandling": {
+                    "type": "bool",
+                    "modifiers": "private",
+                    "readonly": false,
+                    "static": false,
+                    "has_default": false,
+                    "default": null
+                },
+                "signalQueue": {
+                    "type": "SplQueue",
+                    "modifiers": "private readonly",
+                    "readonly": true,
+                    "static": false,
+                    "has_default": false,
+                    "default": null
+                },
+                "streamSelectErrorHandler": {
+                    "type": "Closure",
+                    "modifiers": "private readonly",
+                    "readonly": true,
+                    "static": false,
+                    "has_default": false,
+                    "default": null
+                },
+                "streamSelectIgnoreResult": {
+                    "type": "bool",
+                    "modifiers": "private",
+                    "readonly": false,
+                    "static": false,
+                    "has_default": true,
+                    "default": "false"
+                },
+                "timerQueue": {
+                    "type": "Revolt\\EventLoop\\Internal\\TimerQueue",
+                    "modifiers": "private readonly",
+                    "readonly": true,
+                    "static": false,
+                    "has_default": false,
+                    "default": null
+                },
+                "writeCallbacks": {
+                    "type": "array",
+                    "modifiers": "private",
+                    "readonly": false,
+                    "static": false,
+                    "has_default": true,
+                    "default": "array (\n)"
+                },
+                "writeStreams": {
+                    "type": "array",
+                    "modifiers": "private",
+                    "readonly": false,
+                    "static": false,
+                    "has_default": true,
+                    "default": "array (\n)"
+                }
+            },
+            "methods": {
+                "__construct": {
+                    "modifiers": "public",
+                    "params": [],
+                    "return": null,
+                    "tentative": null,
+                    "required": 0,
+                    "byref_return": false,
+                    "constructor": true
+                },
+                "__destruct": {
+                    "modifiers": "public",
+                    "params": [],
+                    "return": null,
+                    "tentative": null,
+                    "required": 0,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "activate": {
+                    "modifiers": "protected",
+                    "params": [
+                        {
+                            "name": "callbacks",
+                            "type": "array",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "void",
+                    "tentative": null,
+                    "required": 1,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "deactivate": {
+                    "modifiers": "protected",
+                    "params": [
+                        {
+                            "name": "callback",
+                            "type": "Revolt\\EventLoop\\Internal\\DriverCallback",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "void",
+                    "tentative": null,
+                    "required": 1,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "dispatch": {
+                    "modifiers": "protected",
+                    "params": [
+                        {
+                            "name": "blocking",
+                            "type": "bool",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "void",
+                    "tentative": null,
+                    "required": 1,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "getHandle": {
+                    "modifiers": "public",
+                    "params": [],
+                    "return": "mixed",
+                    "tentative": null,
+                    "required": 0,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "getTimeout": {
+                    "modifiers": "private",
+                    "params": [],
+                    "return": "float",
+                    "tentative": null,
+                    "required": 0,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "handleSignal": {
+                    "modifiers": "private",
+                    "params": [
+                        {
+                            "name": "signal",
+                            "type": "int",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "void",
+                    "tentative": null,
+                    "required": 1,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "now": {
+                    "modifiers": "protected",
+                    "params": [],
+                    "return": "float",
+                    "tentative": null,
+                    "required": 0,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "onSignal": {
+                    "modifiers": "public",
+                    "params": [
+                        {
+                            "name": "signal",
+                            "type": "int",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        },
+                        {
+                            "name": "closure",
+                            "type": "Closure",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "string",
+                    "tentative": null,
+                    "required": 2,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "selectStreams": {
+                    "modifiers": "private",
+                    "params": [
+                        {
+                            "name": "read",
+                            "type": "array",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        },
+                        {
+                            "name": "write",
+                            "type": "array",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        },
+                        {
+                            "name": "timeout",
+                            "type": "float",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "void",
+                    "tentative": null,
+                    "required": 3,
+                    "byref_return": false,
+                    "constructor": false
+                }
+            }
+        },
+        "Revolt\\EventLoop\\Driver\\TracingDriver": {
+            "kind": "class",
+            "modifiers": "final",
+            "final": true,
+            "abstract": false,
+            "readonly": false,
+            "instantiable": true,
+            "cloneable": true,
+            "parent": null,
+            "interfaces": [
+                "Revolt\\EventLoop\\Driver"
+            ],
+            "backed": null,
+            "constants": [],
+            "properties": {
+                "cancelTraces": {
+                    "type": "array",
+                    "modifiers": "private",
+                    "readonly": false,
+                    "static": false,
+                    "has_default": true,
+                    "default": "array (\n)"
+                },
+                "creationTraces": {
+                    "type": "array",
+                    "modifiers": "private",
+                    "readonly": false,
+                    "static": false,
+                    "has_default": true,
+                    "default": "array (\n)"
+                },
+                "driver": {
+                    "type": "Revolt\\EventLoop\\Driver",
+                    "modifiers": "private readonly",
+                    "readonly": true,
+                    "static": false,
+                    "has_default": false,
+                    "default": null
+                },
+                "enabledCallbacks": {
+                    "type": "array",
+                    "modifiers": "private",
+                    "readonly": false,
+                    "static": false,
+                    "has_default": true,
+                    "default": "array (\n)"
+                },
+                "unreferencedCallbacks": {
+                    "type": "array",
+                    "modifiers": "private",
+                    "readonly": false,
+                    "static": false,
+                    "has_default": true,
+                    "default": "array (\n)"
+                }
+            },
+            "methods": {
+                "__construct": {
+                    "modifiers": "public",
+                    "params": [
+                        {
+                            "name": "driver",
+                            "type": "Revolt\\EventLoop\\Driver",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": null,
+                    "tentative": null,
+                    "required": 1,
+                    "byref_return": false,
+                    "constructor": true
+                },
+                "__debugInfo": {
+                    "modifiers": "public",
+                    "params": [],
+                    "return": "array",
+                    "tentative": null,
+                    "required": 0,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "cancel": {
+                    "modifiers": "public",
+                    "params": [
+                        {
+                            "name": "callbackId",
+                            "type": "string",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "void",
+                    "tentative": null,
+                    "required": 1,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "defer": {
+                    "modifiers": "public",
+                    "params": [
+                        {
+                            "name": "closure",
+                            "type": "Closure",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "string",
+                    "tentative": null,
+                    "required": 1,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "delay": {
+                    "modifiers": "public",
+                    "params": [
+                        {
+                            "name": "delay",
+                            "type": "float",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        },
+                        {
+                            "name": "closure",
+                            "type": "Closure",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "string",
+                    "tentative": null,
+                    "required": 2,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "disable": {
+                    "modifiers": "public",
+                    "params": [
+                        {
+                            "name": "callbackId",
+                            "type": "string",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "string",
+                    "tentative": null,
+                    "required": 1,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "dump": {
+                    "modifiers": "public",
+                    "params": [],
+                    "return": "string",
+                    "tentative": null,
+                    "required": 0,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "enable": {
+                    "modifiers": "public",
+                    "params": [
+                        {
+                            "name": "callbackId",
+                            "type": "string",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "string",
+                    "tentative": null,
+                    "required": 1,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "formatStacktrace": {
+                    "modifiers": "private",
+                    "params": [
+                        {
+                            "name": "trace",
+                            "type": "array",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "string",
+                    "tentative": null,
+                    "required": 1,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "getCancelTrace": {
+                    "modifiers": "private",
+                    "params": [
+                        {
+                            "name": "callbackId",
+                            "type": "string",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "string",
+                    "tentative": null,
+                    "required": 1,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "getCreationTrace": {
+                    "modifiers": "private",
+                    "params": [
+                        {
+                            "name": "callbackId",
+                            "type": "string",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "string",
+                    "tentative": null,
+                    "required": 1,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "getErrorHandler": {
+                    "modifiers": "public",
+                    "params": [],
+                    "return": "?Closure",
+                    "tentative": null,
+                    "required": 0,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "getHandle": {
+                    "modifiers": "public",
+                    "params": [],
+                    "return": "mixed",
+                    "tentative": null,
+                    "required": 0,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "getIdentifiers": {
+                    "modifiers": "public",
+                    "params": [],
+                    "return": "array",
+                    "tentative": null,
+                    "required": 0,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "getSuspension": {
+                    "modifiers": "public",
+                    "params": [],
+                    "return": "Revolt\\EventLoop\\Suspension",
+                    "tentative": null,
+                    "required": 0,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "getType": {
+                    "modifiers": "public",
+                    "params": [
+                        {
+                            "name": "callbackId",
+                            "type": "string",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "Revolt\\EventLoop\\CallbackType",
+                    "tentative": null,
+                    "required": 1,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "isEnabled": {
+                    "modifiers": "public",
+                    "params": [
+                        {
+                            "name": "callbackId",
+                            "type": "string",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "bool",
+                    "tentative": null,
+                    "required": 1,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "isReferenced": {
+                    "modifiers": "public",
+                    "params": [
+                        {
+                            "name": "callbackId",
+                            "type": "string",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "bool",
+                    "tentative": null,
+                    "required": 1,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "isRunning": {
+                    "modifiers": "public",
+                    "params": [],
+                    "return": "bool",
+                    "tentative": null,
+                    "required": 0,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "onReadable": {
+                    "modifiers": "public",
+                    "params": [
+                        {
+                            "name": "stream",
+                            "type": "mixed",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        },
+                        {
+                            "name": "closure",
+                            "type": "Closure",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "string",
+                    "tentative": null,
+                    "required": 2,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "onSignal": {
+                    "modifiers": "public",
+                    "params": [
+                        {
+                            "name": "signal",
+                            "type": "int",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        },
+                        {
+                            "name": "closure",
+                            "type": "Closure",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "string",
+                    "tentative": null,
+                    "required": 2,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "onWritable": {
+                    "modifiers": "public",
+                    "params": [
+                        {
+                            "name": "stream",
+                            "type": "mixed",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        },
+                        {
+                            "name": "closure",
+                            "type": "Closure",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "string",
+                    "tentative": null,
+                    "required": 2,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "queue": {
+                    "modifiers": "public",
+                    "params": [
+                        {
+                            "name": "closure",
+                            "type": "Closure",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        },
+                        {
+                            "name": "args",
+                            "type": "mixed",
+                            "optional": true,
+                            "byref": false,
+                            "variadic": true,
+                            "default": null
+                        }
+                    ],
+                    "return": "void",
+                    "tentative": null,
+                    "required": 1,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "reference": {
+                    "modifiers": "public",
+                    "params": [
+                        {
+                            "name": "callbackId",
+                            "type": "string",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "string",
+                    "tentative": null,
+                    "required": 1,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "repeat": {
+                    "modifiers": "public",
+                    "params": [
+                        {
+                            "name": "interval",
+                            "type": "float",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        },
+                        {
+                            "name": "closure",
+                            "type": "Closure",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "string",
+                    "tentative": null,
+                    "required": 2,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "run": {
+                    "modifiers": "public",
+                    "params": [],
+                    "return": "void",
+                    "tentative": null,
+                    "required": 0,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "setErrorHandler": {
+                    "modifiers": "public",
+                    "params": [
+                        {
+                            "name": "errorHandler",
+                            "type": "?Closure",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "void",
+                    "tentative": null,
+                    "required": 1,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "stop": {
+                    "modifiers": "public",
+                    "params": [],
+                    "return": "void",
+                    "tentative": null,
+                    "required": 0,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "unreference": {
+                    "modifiers": "public",
+                    "params": [
+                        {
+                            "name": "callbackId",
+                            "type": "string",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "string",
+                    "tentative": null,
+                    "required": 1,
+                    "byref_return": false,
+                    "constructor": false
+                }
+            }
+        },
+        "Revolt\\EventLoop\\Driver\\UvDriver": {
+            "kind": "class",
+            "modifiers": "final",
+            "final": true,
+            "abstract": false,
+            "readonly": false,
+            "instantiable": true,
+            "cloneable": true,
+            "parent": "Revolt\\EventLoop\\Internal\\AbstractDriver",
+            "interfaces": [
+                "Revolt\\EventLoop\\Driver"
+            ],
+            "backed": null,
+            "constants": [],
+            "properties": {
+                "events": {
+                    "type": "array",
+                    "modifiers": "private",
+                    "readonly": false,
+                    "static": false,
+                    "has_default": true,
+                    "default": "array (\n)"
+                },
+                "handle": {
+                    "type": null,
+                    "modifiers": "private",
+                    "readonly": false,
+                    "static": false,
+                    "has_default": true,
+                    "default": "NULL"
+                },
+                "ioCallback": {
+                    "type": "Closure",
+                    "modifiers": "private readonly",
+                    "readonly": true,
+                    "static": false,
+                    "has_default": false,
+                    "default": null
+                },
+                "signalCallback": {
+                    "type": "Closure",
+                    "modifiers": "private readonly",
+                    "readonly": true,
+                    "static": false,
+                    "has_default": false,
+                    "default": null
+                },
+                "streams": {
+                    "type": "array",
+                    "modifiers": "private",
+                    "readonly": false,
+                    "static": false,
+                    "has_default": true,
+                    "default": "array (\n)"
+                },
+                "timerCallback": {
+                    "type": "Closure",
+                    "modifiers": "private readonly",
+                    "readonly": true,
+                    "static": false,
+                    "has_default": false,
+                    "default": null
+                },
+                "uvCallbacks": {
+                    "type": "array",
+                    "modifiers": "private",
+                    "readonly": false,
+                    "static": false,
+                    "has_default": true,
+                    "default": "array (\n)"
+                }
+            },
+            "methods": {
+                "__construct": {
+                    "modifiers": "public",
+                    "params": [],
+                    "return": null,
+                    "tentative": null,
+                    "required": 0,
+                    "byref_return": false,
+                    "constructor": true
+                },
+                "__destruct": {
+                    "modifiers": "public",
+                    "params": [],
+                    "return": null,
+                    "tentative": null,
+                    "required": 0,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "activate": {
+                    "modifiers": "protected",
+                    "params": [
+                        {
+                            "name": "callbacks",
+                            "type": "array",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "void",
+                    "tentative": null,
+                    "required": 1,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "cancel": {
+                    "modifiers": "public",
+                    "params": [
+                        {
+                            "name": "callbackId",
+                            "type": "string",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "void",
+                    "tentative": null,
+                    "required": 1,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "deactivate": {
+                    "modifiers": "protected",
+                    "params": [
+                        {
+                            "name": "callback",
+                            "type": "Revolt\\EventLoop\\Internal\\DriverCallback",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "void",
+                    "tentative": null,
+                    "required": 1,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "dispatch": {
+                    "modifiers": "protected",
+                    "params": [
+                        {
+                            "name": "blocking",
+                            "type": "bool",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "void",
+                    "tentative": null,
+                    "required": 1,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "getHandle": {
+                    "modifiers": "public",
+                    "params": [],
+                    "return": "mixed",
+                    "tentative": null,
+                    "required": 0,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "getStreamCallbackFlags": {
+                    "modifiers": "private",
+                    "params": [
+                        {
+                            "name": "callback",
+                            "type": "Revolt\\EventLoop\\Internal\\StreamCallback",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "int",
+                    "tentative": null,
+                    "required": 1,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "isSupported": {
+                    "modifiers": "public static",
+                    "params": [],
+                    "return": "bool",
+                    "tentative": null,
+                    "required": 0,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "now": {
+                    "modifiers": "protected",
+                    "params": [],
+                    "return": "float",
+                    "tentative": null,
+                    "required": 0,
+                    "byref_return": false,
+                    "constructor": false
+                }
+            }
+        },
+        "Revolt\\EventLoop\\FiberLocal": {
+            "kind": "class",
+            "modifiers": "final",
+            "final": true,
+            "abstract": false,
+            "readonly": false,
+            "instantiable": true,
+            "cloneable": true,
+            "parent": null,
+            "interfaces": [],
+            "backed": null,
+            "constants": [],
+            "properties": {
+                "initializer": {
+                    "type": "Closure",
+                    "modifiers": "private readonly",
+                    "readonly": true,
+                    "static": false,
+                    "has_default": false,
+                    "default": null
+                },
+                "localStorage": {
+                    "type": "?WeakMap",
+                    "modifiers": "private static",
+                    "readonly": false,
+                    "static": true,
+                    "has_default": true,
+                    "default": "NULL"
+                },
+                "mainFiber": {
+                    "type": "?Fiber",
+                    "modifiers": "private static",
+                    "readonly": false,
+                    "static": true,
+                    "has_default": true,
+                    "default": "NULL"
+                }
+            },
+            "methods": {
+                "__construct": {
+                    "modifiers": "public",
+                    "params": [
+                        {
+                            "name": "initializer",
+                            "type": "Closure",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": null,
+                    "tentative": null,
+                    "required": 1,
+                    "byref_return": false,
+                    "constructor": true
+                },
+                "clear": {
+                    "modifiers": "public static",
+                    "params": [],
+                    "return": "void",
+                    "tentative": null,
+                    "required": 0,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "get": {
+                    "modifiers": "public",
+                    "params": [],
+                    "return": "mixed",
+                    "tentative": null,
+                    "required": 0,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "getFiberStorage": {
+                    "modifiers": "private static",
+                    "params": [],
+                    "return": "WeakMap",
+                    "tentative": null,
+                    "required": 0,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "set": {
+                    "modifiers": "public",
+                    "params": [
+                        {
+                            "name": "value",
+                            "type": "mixed",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "void",
+                    "tentative": null,
+                    "required": 1,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "unset": {
+                    "modifiers": "public",
+                    "params": [],
+                    "return": "void",
+                    "tentative": null,
+                    "required": 0,
+                    "byref_return": false,
+                    "constructor": false
+                }
+            }
+        },
+        "Revolt\\EventLoop\\Internal\\AbstractDriver": {
+            "kind": "class",
+            "modifiers": "abstract",
+            "final": false,
+            "abstract": true,
+            "readonly": false,
+            "instantiable": false,
+            "cloneable": false,
+            "parent": null,
+            "interfaces": [
+                "Revolt\\EventLoop\\Driver"
+            ],
+            "backed": null,
+            "constants": [],
+            "properties": {
+                "callbackFiber": {
+                    "type": "Fiber",
+                    "modifiers": "private",
+                    "readonly": false,
+                    "static": false,
+                    "has_default": false,
+                    "default": null
+                },
+                "callbackQueue": {
+                    "type": "SplQueue",
+                    "modifiers": "private readonly",
+                    "readonly": true,
+                    "static": false,
+                    "has_default": false,
+                    "default": null
+                },
+                "callbacks": {
+                    "type": "array",
+                    "modifiers": "private",
+                    "readonly": false,
+                    "static": false,
+                    "has_default": true,
+                    "default": "array (\n)"
+                },
+                "enableDeferQueue": {
+                    "type": "array",
+                    "modifiers": "private",
+                    "readonly": false,
+                    "static": false,
+                    "has_default": true,
+                    "default": "array (\n)"
+                },
+                "enableQueue": {
+                    "type": "array",
+                    "modifiers": "private",
+                    "readonly": false,
+                    "static": false,
+                    "has_default": true,
+                    "default": "array (\n)"
+                },
+                "errorCallback": {
+                    "type": "Closure",
+                    "modifiers": "private",
+                    "readonly": false,
+                    "static": false,
+                    "has_default": false,
+                    "default": null
+                },
+                "errorHandler": {
+                    "type": "?Closure",
+                    "modifiers": "private",
+                    "readonly": false,
+                    "static": false,
+                    "has_default": true,
+                    "default": "NULL"
+                },
+                "fiber": {
+                    "type": "Fiber",
+                    "modifiers": "private",
+                    "readonly": false,
+                    "static": false,
+                    "has_default": false,
+                    "default": null
+                },
+                "idle": {
+                    "type": "bool",
+                    "modifiers": "private",
+                    "readonly": false,
+                    "static": false,
+                    "has_default": true,
+                    "default": "false"
+                },
+                "internalSuspensionMarker": {
+                    "type": "stdClass",
+                    "modifiers": "private readonly",
+                    "readonly": true,
+                    "static": false,
+                    "has_default": false,
+                    "default": null
+                },
+                "interrupt": {
+                    "type": "?Closure",
+                    "modifiers": "private",
+                    "readonly": false,
+                    "static": false,
+                    "has_default": true,
+                    "default": "NULL"
+                },
+                "interruptCallback": {
+                    "type": "Closure",
+                    "modifiers": "private readonly",
+                    "readonly": true,
+                    "static": false,
+                    "has_default": false,
+                    "default": null
+                },
+                "microtaskQueue": {
+                    "type": "SplQueue",
+                    "modifiers": "private readonly",
+                    "readonly": true,
+                    "static": false,
+                    "has_default": false,
+                    "default": null
+                },
+                "nextId": {
+                    "type": "string",
+                    "modifiers": "private",
+                    "readonly": false,
+                    "static": false,
+                    "has_default": true,
+                    "default": "'a'"
+                },
+                "queueCallback": {
+                    "type": "Closure",
+                    "modifiers": "private readonly",
+                    "readonly": true,
+                    "static": false,
+                    "has_default": false,
+                    "default": null
+                },
+                "runCallback": {
+                    "type": "Closure",
+                    "modifiers": "private readonly",
+                    "readonly": true,
+                    "static": false,
+                    "has_default": false,
+                    "default": null
+                },
+                "stopped": {
+                    "type": "bool",
+                    "modifiers": "private",
+                    "readonly": false,
+                    "static": false,
+                    "has_default": true,
+                    "default": "false"
+                },
+                "suspensions": {
+                    "type": "WeakMap",
+                    "modifiers": "private",
+                    "readonly": false,
+                    "static": false,
+                    "has_default": false,
+                    "default": null
+                }
+            },
+            "methods": {
+                "__construct": {
+                    "modifiers": "public",
+                    "params": [],
+                    "return": null,
+                    "tentative": null,
+                    "required": 0,
+                    "byref_return": false,
+                    "constructor": true
+                },
+                "__debugInfo": {
+                    "modifiers": "public",
+                    "params": [],
+                    "return": "array",
+                    "tentative": null,
+                    "required": 0,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "__serialize": {
+                    "modifiers": "final public",
+                    "params": [],
+                    "return": "never",
+                    "tentative": null,
+                    "required": 0,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "__unserialize": {
+                    "modifiers": "final public",
+                    "params": [
+                        {
+                            "name": "data",
+                            "type": "array",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "never",
+                    "tentative": null,
+                    "required": 1,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "activate": {
+                    "modifiers": "abstract protected",
+                    "params": [
+                        {
+                            "name": "callbacks",
+                            "type": "array",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "void",
+                    "tentative": null,
+                    "required": 1,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "callbackId": {
+                    "modifiers": "private",
+                    "params": [],
+                    "return": "string",
+                    "tentative": null,
+                    "required": 0,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "cancel": {
+                    "modifiers": "public",
+                    "params": [
+                        {
+                            "name": "callbackId",
+                            "type": "string",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "void",
+                    "tentative": null,
+                    "required": 1,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "createCallbackFiber": {
+                    "modifiers": "private",
+                    "params": [],
+                    "return": "void",
+                    "tentative": null,
+                    "required": 0,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "createErrorCallback": {
+                    "modifiers": "private",
+                    "params": [],
+                    "return": "void",
+                    "tentative": null,
+                    "required": 0,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "createLoopFiber": {
+                    "modifiers": "private",
+                    "params": [],
+                    "return": "void",
+                    "tentative": null,
+                    "required": 0,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "deactivate": {
+                    "modifiers": "abstract protected",
+                    "params": [
+                        {
+                            "name": "callback",
+                            "type": "Revolt\\EventLoop\\Internal\\DriverCallback",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "void",
+                    "tentative": null,
+                    "required": 1,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "defer": {
+                    "modifiers": "public",
+                    "params": [
+                        {
+                            "name": "closure",
+                            "type": "Closure",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "string",
+                    "tentative": null,
+                    "required": 1,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "delay": {
+                    "modifiers": "public",
+                    "params": [
+                        {
+                            "name": "delay",
+                            "type": "float",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        },
+                        {
+                            "name": "closure",
+                            "type": "Closure",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "string",
+                    "tentative": null,
+                    "required": 2,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "disable": {
+                    "modifiers": "public",
+                    "params": [
+                        {
+                            "name": "callbackId",
+                            "type": "string",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "string",
+                    "tentative": null,
+                    "required": 1,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "dispatch": {
+                    "modifiers": "abstract protected",
+                    "params": [
+                        {
+                            "name": "blocking",
+                            "type": "bool",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "void",
+                    "tentative": null,
+                    "required": 1,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "enable": {
+                    "modifiers": "public",
+                    "params": [
+                        {
+                            "name": "callbackId",
+                            "type": "string",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "string",
+                    "tentative": null,
+                    "required": 1,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "enqueueCallback": {
+                    "modifiers": "final protected",
+                    "params": [
+                        {
+                            "name": "callback",
+                            "type": "Revolt\\EventLoop\\Internal\\DriverCallback",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "void",
+                    "tentative": null,
+                    "required": 1,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "error": {
+                    "modifiers": "final protected",
+                    "params": [
+                        {
+                            "name": "closure",
+                            "type": "Closure",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        },
+                        {
+                            "name": "exception",
+                            "type": "Throwable",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "void",
+                    "tentative": null,
+                    "required": 2,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "getErrorHandler": {
+                    "modifiers": "public",
+                    "params": [],
+                    "return": "?Closure",
+                    "tentative": null,
+                    "required": 0,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "getIdentifiers": {
+                    "modifiers": "public",
+                    "params": [],
+                    "return": "array",
+                    "tentative": null,
+                    "required": 0,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "getSuspension": {
+                    "modifiers": "public",
+                    "params": [],
+                    "return": "Revolt\\EventLoop\\Suspension",
+                    "tentative": null,
+                    "required": 0,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "getType": {
+                    "modifiers": "public",
+                    "params": [
+                        {
+                            "name": "callbackId",
+                            "type": "string",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "Revolt\\EventLoop\\CallbackType",
+                    "tentative": null,
+                    "required": 1,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "invokeCallbacks": {
+                    "modifiers": "private",
+                    "params": [],
+                    "return": "void",
+                    "tentative": null,
+                    "required": 0,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "invokeInterrupt": {
+                    "modifiers": "private",
+                    "params": [],
+                    "return": "void",
+                    "tentative": null,
+                    "required": 0,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "invokeMicrotasks": {
+                    "modifiers": "private",
+                    "params": [],
+                    "return": "void",
+                    "tentative": null,
+                    "required": 0,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "isEmpty": {
+                    "modifiers": "private",
+                    "params": [],
+                    "return": "bool",
+                    "tentative": null,
+                    "required": 0,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "isEnabled": {
+                    "modifiers": "public",
+                    "params": [
+                        {
+                            "name": "callbackId",
+                            "type": "string",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "bool",
+                    "tentative": null,
+                    "required": 1,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "isReferenced": {
+                    "modifiers": "public",
+                    "params": [
+                        {
+                            "name": "callbackId",
+                            "type": "string",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "bool",
+                    "tentative": null,
+                    "required": 1,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "isRunning": {
+                    "modifiers": "public",
+                    "params": [],
+                    "return": "bool",
+                    "tentative": null,
+                    "required": 0,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "now": {
+                    "modifiers": "abstract protected",
+                    "params": [],
+                    "return": "float",
+                    "tentative": null,
+                    "required": 0,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "onReadable": {
+                    "modifiers": "public",
+                    "params": [
+                        {
+                            "name": "stream",
+                            "type": "mixed",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        },
+                        {
+                            "name": "closure",
+                            "type": "Closure",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "string",
+                    "tentative": null,
+                    "required": 2,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "onSignal": {
+                    "modifiers": "public",
+                    "params": [
+                        {
+                            "name": "signal",
+                            "type": "int",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        },
+                        {
+                            "name": "closure",
+                            "type": "Closure",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "string",
+                    "tentative": null,
+                    "required": 2,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "onWritable": {
+                    "modifiers": "public",
+                    "params": [
+                        {
+                            "name": "stream",
+                            "type": null,
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        },
+                        {
+                            "name": "closure",
+                            "type": "Closure",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "string",
+                    "tentative": null,
+                    "required": 2,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "queue": {
+                    "modifiers": "public",
+                    "params": [
+                        {
+                            "name": "closure",
+                            "type": "Closure",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        },
+                        {
+                            "name": "args",
+                            "type": "mixed",
+                            "optional": true,
+                            "byref": false,
+                            "variadic": true,
+                            "default": null
+                        }
+                    ],
+                    "return": "void",
+                    "tentative": null,
+                    "required": 1,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "reference": {
+                    "modifiers": "public",
+                    "params": [
+                        {
+                            "name": "callbackId",
+                            "type": "string",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "string",
+                    "tentative": null,
+                    "required": 1,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "repeat": {
+                    "modifiers": "public",
+                    "params": [
+                        {
+                            "name": "interval",
+                            "type": "float",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        },
+                        {
+                            "name": "closure",
+                            "type": "Closure",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "string",
+                    "tentative": null,
+                    "required": 2,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "run": {
+                    "modifiers": "public",
+                    "params": [],
+                    "return": "void",
+                    "tentative": null,
+                    "required": 0,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "setErrorHandler": {
+                    "modifiers": "public",
+                    "params": [
+                        {
+                            "name": "errorHandler",
+                            "type": "?Closure",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "void",
+                    "tentative": null,
+                    "required": 1,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "setInterrupt": {
+                    "modifiers": "private",
+                    "params": [
+                        {
+                            "name": "interrupt",
+                            "type": "Closure",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "void",
+                    "tentative": null,
+                    "required": 1,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "stop": {
+                    "modifiers": "public",
+                    "params": [],
+                    "return": "void",
+                    "tentative": null,
+                    "required": 0,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "tick": {
+                    "modifiers": "private",
+                    "params": [
+                        {
+                            "name": "previousIdle",
+                            "type": "bool",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "void",
+                    "tentative": null,
+                    "required": 1,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "unreference": {
+                    "modifiers": "public",
+                    "params": [
+                        {
+                            "name": "callbackId",
+                            "type": "string",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "string",
+                    "tentative": null,
+                    "required": 1,
+                    "byref_return": false,
+                    "constructor": false
+                }
+            }
+        },
+        "Revolt\\EventLoop\\Internal\\ClosureHelper": {
+            "kind": "class",
+            "modifiers": "final",
+            "final": true,
+            "abstract": false,
+            "readonly": false,
+            "instantiable": true,
+            "cloneable": true,
+            "parent": null,
+            "interfaces": [],
+            "backed": null,
+            "constants": [],
+            "properties": [],
+            "methods": {
+                "getDescription": {
+                    "modifiers": "public static",
+                    "params": [
+                        {
+                            "name": "closure",
+                            "type": "Closure",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "string",
+                    "tentative": null,
+                    "required": 1,
+                    "byref_return": false,
+                    "constructor": false
+                }
+            }
+        },
+        "Revolt\\EventLoop\\Internal\\DeferCallback": {
+            "kind": "class",
+            "modifiers": "final",
+            "final": true,
+            "abstract": false,
+            "readonly": false,
+            "instantiable": true,
+            "cloneable": true,
+            "parent": "Revolt\\EventLoop\\Internal\\DriverCallback",
+            "interfaces": [],
+            "backed": null,
+            "constants": [],
+            "properties": [],
+            "methods": []
+        },
+        "Revolt\\EventLoop\\Internal\\DriverCallback": {
+            "kind": "class",
+            "modifiers": "abstract",
+            "final": false,
+            "abstract": true,
+            "readonly": false,
+            "instantiable": false,
+            "cloneable": false,
+            "parent": null,
+            "interfaces": [],
+            "backed": null,
+            "constants": [],
+            "properties": {
+                "closure": {
+                    "type": "Closure",
+                    "modifiers": "public protected(set) readonly",
+                    "readonly": true,
+                    "static": false,
+                    "has_default": false,
+                    "default": null
+                },
+                "enabled": {
+                    "type": "bool",
+                    "modifiers": "public",
+                    "readonly": false,
+                    "static": false,
+                    "has_default": true,
+                    "default": "true"
+                },
+                "id": {
+                    "type": "string",
+                    "modifiers": "public protected(set) readonly",
+                    "readonly": true,
+                    "static": false,
+                    "has_default": false,
+                    "default": null
+                },
+                "invokable": {
+                    "type": "bool",
+                    "modifiers": "public",
+                    "readonly": false,
+                    "static": false,
+                    "has_default": true,
+                    "default": "false"
+                },
+                "referenced": {
+                    "type": "bool",
+                    "modifiers": "public",
+                    "readonly": false,
+                    "static": false,
+                    "has_default": true,
+                    "default": "true"
+                }
+            },
+            "methods": {
+                "__construct": {
+                    "modifiers": "public",
+                    "params": [
+                        {
+                            "name": "id",
+                            "type": "string",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        },
+                        {
+                            "name": "closure",
+                            "type": "Closure",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": null,
+                    "tentative": null,
+                    "required": 2,
+                    "byref_return": false,
+                    "constructor": true
+                },
+                "__get": {
+                    "modifiers": "public",
+                    "params": [
+                        {
+                            "name": "property",
+                            "type": "string",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "never",
+                    "tentative": null,
+                    "required": 1,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "__set": {
+                    "modifiers": "public",
+                    "params": [
+                        {
+                            "name": "property",
+                            "type": "string",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        },
+                        {
+                            "name": "value",
+                            "type": "mixed",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "never",
+                    "tentative": null,
+                    "required": 2,
+                    "byref_return": false,
+                    "constructor": false
+                }
+            }
+        },
+        "Revolt\\EventLoop\\Internal\\DriverSuspension": {
+            "kind": "class",
+            "modifiers": "final",
+            "final": true,
+            "abstract": false,
+            "readonly": false,
+            "instantiable": true,
+            "cloneable": true,
+            "parent": null,
+            "interfaces": [
+                "Revolt\\EventLoop\\Suspension"
+            ],
+            "backed": null,
+            "constants": [],
+            "properties": {
+                "deadMain": {
+                    "type": "bool",
+                    "modifiers": "private",
+                    "readonly": false,
+                    "static": false,
+                    "has_default": true,
+                    "default": "false"
+                },
+                "error": {
+                    "type": "?Error",
+                    "modifiers": "private",
+                    "readonly": false,
+                    "static": false,
+                    "has_default": true,
+                    "default": "NULL"
+                },
+                "fiberRef": {
+                    "type": "?WeakReference",
+                    "modifiers": "private readonly",
+                    "readonly": true,
+                    "static": false,
+                    "has_default": false,
+                    "default": null
+                },
+                "interrupt": {
+                    "type": "Closure",
+                    "modifiers": "private readonly",
+                    "readonly": true,
+                    "static": false,
+                    "has_default": false,
+                    "default": null
+                },
+                "pending": {
+                    "type": "bool",
+                    "modifiers": "private",
+                    "readonly": false,
+                    "static": false,
+                    "has_default": true,
+                    "default": "false"
+                },
+                "queue": {
+                    "type": "Closure",
+                    "modifiers": "private readonly",
+                    "readonly": true,
+                    "static": false,
+                    "has_default": false,
+                    "default": null
+                },
+                "run": {
+                    "type": "Closure",
+                    "modifiers": "private readonly",
+                    "readonly": true,
+                    "static": false,
+                    "has_default": false,
+                    "default": null
+                },
+                "suspendedFiber": {
+                    "type": "?Fiber",
+                    "modifiers": "private",
+                    "readonly": false,
+                    "static": false,
+                    "has_default": true,
+                    "default": "NULL"
+                },
+                "suspensions": {
+                    "type": "WeakMap",
+                    "modifiers": "private readonly",
+                    "readonly": true,
+                    "static": false,
+                    "has_default": false,
+                    "default": null
+                }
+            },
+            "methods": {
+                "__construct": {
+                    "modifiers": "public",
+                    "params": [
+                        {
+                            "name": "run",
+                            "type": "Closure",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        },
+                        {
+                            "name": "queue",
+                            "type": "Closure",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        },
+                        {
+                            "name": "interrupt",
+                            "type": "Closure",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        },
+                        {
+                            "name": "suspensions",
+                            "type": "WeakMap",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": null,
+                    "tentative": null,
+                    "required": 4,
+                    "byref_return": false,
+                    "constructor": true
+                },
+                "formatStacktrace": {
+                    "modifiers": "private",
+                    "params": [
+                        {
+                            "name": "trace",
+                            "type": "array",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "string",
+                    "tentative": null,
+                    "required": 1,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "resume": {
+                    "modifiers": "public",
+                    "params": [
+                        {
+                            "name": "value",
+                            "type": "mixed",
+                            "optional": true,
+                            "byref": false,
+                            "variadic": false,
+                            "default": "NULL"
+                        }
+                    ],
+                    "return": "void",
+                    "tentative": null,
+                    "required": 0,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "suspend": {
+                    "modifiers": "public",
+                    "params": [],
+                    "return": "mixed",
+                    "tentative": null,
+                    "required": 0,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "throw": {
+                    "modifiers": "public",
+                    "params": [
+                        {
+                            "name": "throwable",
+                            "type": "Throwable",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "void",
+                    "tentative": null,
+                    "required": 1,
+                    "byref_return": false,
+                    "constructor": false
+                }
+            }
+        },
+        "Revolt\\EventLoop\\Internal\\SignalCallback": {
+            "kind": "class",
+            "modifiers": "final",
+            "final": true,
+            "abstract": false,
+            "readonly": false,
+            "instantiable": true,
+            "cloneable": true,
+            "parent": "Revolt\\EventLoop\\Internal\\DriverCallback",
+            "interfaces": [],
+            "backed": null,
+            "constants": [],
+            "properties": {
+                "signal": {
+                    "type": "int",
+                    "modifiers": "public protected(set) readonly",
+                    "readonly": true,
+                    "static": false,
+                    "has_default": false,
+                    "default": null
+                }
+            },
+            "methods": {
+                "__construct": {
+                    "modifiers": "public",
+                    "params": [
+                        {
+                            "name": "id",
+                            "type": "string",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        },
+                        {
+                            "name": "closure",
+                            "type": "Closure",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        },
+                        {
+                            "name": "signal",
+                            "type": "int",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": null,
+                    "tentative": null,
+                    "required": 3,
+                    "byref_return": false,
+                    "constructor": true
+                }
+            }
+        },
+        "Revolt\\EventLoop\\Internal\\StreamCallback": {
+            "kind": "class",
+            "modifiers": "abstract",
+            "final": false,
+            "abstract": true,
+            "readonly": false,
+            "instantiable": false,
+            "cloneable": false,
+            "parent": "Revolt\\EventLoop\\Internal\\DriverCallback",
+            "interfaces": [],
+            "backed": null,
+            "constants": [],
+            "properties": {
+                "stream": {
+                    "type": "mixed",
+                    "modifiers": "public protected(set) readonly",
+                    "readonly": true,
+                    "static": false,
+                    "has_default": false,
+                    "default": null
+                }
+            },
+            "methods": {
+                "__construct": {
+                    "modifiers": "public",
+                    "params": [
+                        {
+                            "name": "id",
+                            "type": "string",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        },
+                        {
+                            "name": "closure",
+                            "type": "Closure",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        },
+                        {
+                            "name": "stream",
+                            "type": "mixed",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": null,
+                    "tentative": null,
+                    "required": 3,
+                    "byref_return": false,
+                    "constructor": true
+                }
+            }
+        },
+        "Revolt\\EventLoop\\Internal\\StreamReadableCallback": {
+            "kind": "class",
+            "modifiers": "final",
+            "final": true,
+            "abstract": false,
+            "readonly": false,
+            "instantiable": true,
+            "cloneable": true,
+            "parent": "Revolt\\EventLoop\\Internal\\StreamCallback",
+            "interfaces": [],
+            "backed": null,
+            "constants": [],
+            "properties": [],
+            "methods": []
+        },
+        "Revolt\\EventLoop\\Internal\\StreamWritableCallback": {
+            "kind": "class",
+            "modifiers": "final",
+            "final": true,
+            "abstract": false,
+            "readonly": false,
+            "instantiable": true,
+            "cloneable": true,
+            "parent": "Revolt\\EventLoop\\Internal\\StreamCallback",
+            "interfaces": [],
+            "backed": null,
+            "constants": [],
+            "properties": [],
+            "methods": []
+        },
+        "Revolt\\EventLoop\\Internal\\TimerCallback": {
+            "kind": "class",
+            "modifiers": "final",
+            "final": true,
+            "abstract": false,
+            "readonly": false,
+            "instantiable": true,
+            "cloneable": true,
+            "parent": "Revolt\\EventLoop\\Internal\\DriverCallback",
+            "interfaces": [],
+            "backed": null,
+            "constants": [],
+            "properties": {
+                "expiration": {
+                    "type": "float",
+                    "modifiers": "public",
+                    "readonly": false,
+                    "static": false,
+                    "has_default": false,
+                    "default": null
+                },
+                "interval": {
+                    "type": "float",
+                    "modifiers": "public protected(set) readonly",
+                    "readonly": true,
+                    "static": false,
+                    "has_default": false,
+                    "default": null
+                },
+                "repeat": {
+                    "type": "bool",
+                    "modifiers": "public protected(set) readonly",
+                    "readonly": true,
+                    "static": false,
+                    "has_default": false,
+                    "default": null
+                }
+            },
+            "methods": {
+                "__construct": {
+                    "modifiers": "public",
+                    "params": [
+                        {
+                            "name": "id",
+                            "type": "string",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        },
+                        {
+                            "name": "interval",
+                            "type": "float",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        },
+                        {
+                            "name": "callback",
+                            "type": "Closure",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        },
+                        {
+                            "name": "expiration",
+                            "type": "float",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        },
+                        {
+                            "name": "repeat",
+                            "type": "bool",
+                            "optional": true,
+                            "byref": false,
+                            "variadic": false,
+                            "default": "false"
+                        }
+                    ],
+                    "return": null,
+                    "tentative": null,
+                    "required": 4,
+                    "byref_return": false,
+                    "constructor": true
+                }
+            }
+        },
+        "Revolt\\EventLoop\\Internal\\TimerQueue": {
+            "kind": "class",
+            "modifiers": "final",
+            "final": true,
+            "abstract": false,
+            "readonly": false,
+            "instantiable": true,
+            "cloneable": true,
+            "parent": null,
+            "interfaces": [],
+            "backed": null,
+            "constants": [],
+            "properties": {
+                "callbacks": {
+                    "type": "array",
+                    "modifiers": "private",
+                    "readonly": false,
+                    "static": false,
+                    "has_default": true,
+                    "default": "array (\n)"
+                },
+                "pointers": {
+                    "type": "array",
+                    "modifiers": "private",
+                    "readonly": false,
+                    "static": false,
+                    "has_default": true,
+                    "default": "array (\n)"
+                }
+            },
+            "methods": {
+                "extract": {
+                    "modifiers": "public",
+                    "params": [
+                        {
+                            "name": "now",
+                            "type": "float",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "?Revolt\\EventLoop\\Internal\\TimerCallback",
+                    "tentative": null,
+                    "required": 1,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "heapifyDown": {
+                    "modifiers": "private",
+                    "params": [
+                        {
+                            "name": "node",
+                            "type": "int",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "void",
+                    "tentative": null,
+                    "required": 1,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "heapifyUp": {
+                    "modifiers": "private",
+                    "params": [
+                        {
+                            "name": "node",
+                            "type": "int",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "void",
+                    "tentative": null,
+                    "required": 1,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "insert": {
+                    "modifiers": "public",
+                    "params": [
+                        {
+                            "name": "callback",
+                            "type": "Revolt\\EventLoop\\Internal\\TimerCallback",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "void",
+                    "tentative": null,
+                    "required": 1,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "peek": {
+                    "modifiers": "public",
+                    "params": [],
+                    "return": "?float",
+                    "tentative": null,
+                    "required": 0,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "remove": {
+                    "modifiers": "public",
+                    "params": [
+                        {
+                            "name": "callback",
+                            "type": "Revolt\\EventLoop\\Internal\\TimerCallback",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "void",
+                    "tentative": null,
+                    "required": 1,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "removeAndRebuild": {
+                    "modifiers": "private",
+                    "params": [
+                        {
+                            "name": "node",
+                            "type": "int",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "void",
+                    "tentative": null,
+                    "required": 1,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "swap": {
+                    "modifiers": "private",
+                    "params": [
+                        {
+                            "name": "left",
+                            "type": "int",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        },
+                        {
+                            "name": "right",
+                            "type": "int",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "void",
+                    "tentative": null,
+                    "required": 2,
+                    "byref_return": false,
+                    "constructor": false
+                }
+            }
+        },
+        "Revolt\\EventLoop\\InvalidCallbackError": {
+            "kind": "class",
+            "modifiers": "final",
+            "final": true,
+            "abstract": false,
+            "readonly": false,
+            "instantiable": false,
+            "cloneable": false,
+            "parent": "Error",
+            "interfaces": [
+                "Throwable",
+                "Stringable"
+            ],
+            "backed": null,
+            "constants": {
+                "E_INVALID_IDENTIFIER": {
+                    "value": "2",
+                    "modifiers": "public",
+                    "case": false,
+                    "type": null
+                },
+                "E_NONNULL_RETURN": {
+                    "value": "1",
+                    "modifiers": "public",
+                    "case": false,
+                    "type": null
+                }
+            },
+            "properties": {
+                "callbackId": {
+                    "type": "string",
+                    "modifiers": "private readonly",
+                    "readonly": true,
+                    "static": false,
+                    "has_default": false,
+                    "default": null
+                },
+                "info": {
+                    "type": "array",
+                    "modifiers": "private",
+                    "readonly": false,
+                    "static": false,
+                    "has_default": true,
+                    "default": "array (\n)"
+                },
+                "rawMessage": {
+                    "type": "string",
+                    "modifiers": "private readonly",
+                    "readonly": true,
+                    "static": false,
+                    "has_default": false,
+                    "default": null
+                }
+            },
+            "methods": {
+                "__construct": {
+                    "modifiers": "private",
+                    "params": [
+                        {
+                            "name": "callbackId",
+                            "type": "string",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        },
+                        {
+                            "name": "code",
+                            "type": "int",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        },
+                        {
+                            "name": "message",
+                            "type": "string",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": null,
+                    "tentative": null,
+                    "required": 3,
+                    "byref_return": false,
+                    "constructor": true
+                },
+                "addInfo": {
+                    "modifiers": "public",
+                    "params": [
+                        {
+                            "name": "key",
+                            "type": "string",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        },
+                        {
+                            "name": "message",
+                            "type": "string",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "void",
+                    "tentative": null,
+                    "required": 2,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "getCallbackId": {
+                    "modifiers": "public",
+                    "params": [],
+                    "return": "string",
+                    "tentative": null,
+                    "required": 0,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "invalidIdentifier": {
+                    "modifiers": "public static",
+                    "params": [
+                        {
+                            "name": "callbackId",
+                            "type": "string",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "Revolt\\EventLoop\\InvalidCallbackError",
+                    "tentative": null,
+                    "required": 1,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "nonNullReturn": {
+                    "modifiers": "public static",
+                    "params": [
+                        {
+                            "name": "callbackId",
+                            "type": "string",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        },
+                        {
+                            "name": "closure",
+                            "type": "Closure",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "Revolt\\EventLoop\\InvalidCallbackError",
+                    "tentative": null,
+                    "required": 2,
+                    "byref_return": false,
+                    "constructor": false
+                }
+            }
+        },
+        "Revolt\\EventLoop\\Suspension": {
+            "kind": "interface",
+            "modifiers": "",
+            "final": false,
+            "abstract": true,
+            "readonly": false,
+            "instantiable": false,
+            "cloneable": false,
+            "parent": null,
+            "interfaces": [],
+            "backed": null,
+            "constants": [],
+            "properties": [],
+            "methods": {
+                "resume": {
+                    "modifiers": "abstract public",
+                    "params": [
+                        {
+                            "name": "value",
+                            "type": "mixed",
+                            "optional": true,
+                            "byref": false,
+                            "variadic": false,
+                            "default": "NULL"
+                        }
+                    ],
+                    "return": "void",
+                    "tentative": null,
+                    "required": 0,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "suspend": {
+                    "modifiers": "abstract public",
+                    "params": [],
+                    "return": "mixed",
+                    "tentative": null,
+                    "required": 0,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "throw": {
+                    "modifiers": "abstract public",
+                    "params": [
+                        {
+                            "name": "throwable",
+                            "type": "Throwable",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "void",
+                    "tentative": null,
+                    "required": 1,
+                    "byref_return": false,
+                    "constructor": false
+                }
+            }
+        },
+        "Revolt\\EventLoop\\UncaughtThrowable": {
+            "kind": "class",
+            "modifiers": "final",
+            "final": true,
+            "abstract": false,
+            "readonly": false,
+            "instantiable": false,
+            "cloneable": false,
+            "parent": "Error",
+            "interfaces": [
+                "Throwable",
+                "Stringable"
+            ],
+            "backed": null,
+            "constants": [],
+            "properties": [],
+            "methods": {
+                "__construct": {
+                    "modifiers": "private",
+                    "params": [
+                        {
+                            "name": "message",
+                            "type": "string",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        },
+                        {
+                            "name": "closure",
+                            "type": "Closure",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        },
+                        {
+                            "name": "previous",
+                            "type": "Throwable",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": null,
+                    "tentative": null,
+                    "required": 3,
+                    "byref_return": false,
+                    "constructor": true
+                },
+                "throwingCallback": {
+                    "modifiers": "public static",
+                    "params": [
+                        {
+                            "name": "closure",
+                            "type": "Closure",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        },
+                        {
+                            "name": "previous",
+                            "type": "Throwable",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "Revolt\\EventLoop\\UncaughtThrowable",
+                    "tentative": null,
+                    "required": 2,
+                    "byref_return": false,
+                    "constructor": false
+                },
+                "throwingErrorHandler": {
+                    "modifiers": "public static",
+                    "params": [
+                        {
+                            "name": "closure",
+                            "type": "Closure",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        },
+                        {
+                            "name": "previous",
+                            "type": "Throwable",
+                            "optional": false,
+                            "byref": false,
+                            "variadic": false,
+                            "default": null
+                        }
+                    ],
+                    "return": "Revolt\\EventLoop\\UncaughtThrowable",
+                    "tentative": null,
+                    "required": 2,
+                    "byref_return": false,
+                    "constructor": false
+                }
+            }
+        },
+        "Revolt\\EventLoop\\UnsupportedFeatureException": {
+            "kind": "class",
+            "modifiers": "final",
+            "final": true,
+            "abstract": false,
+            "readonly": false,
+            "instantiable": true,
+            "cloneable": false,
+            "parent": "Exception",
+            "interfaces": [
+                "Throwable",
+                "Stringable"
+            ],
+            "backed": null,
+            "constants": [],
+            "properties": [],
+            "methods": []
+        }
+    }
+}

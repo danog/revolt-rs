@@ -1,0 +1,15 @@
+{
+    "description": "Test harness of revolt-rs: revolt/event-loop's own suite (tests/revolt) and ours (tests/native). revolt/event-loop itself is NOT installed: the extension provides its classes.",
+    "require-dev": {
+        "phpunit/phpunit": "^9.6"
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Revolt\\EventLoop\\": "revolt/",
+            "RevoltRs\\Tests\\": "native/"
+        }
+    },
+    "config": {
+        "optimize-autoloader": false
+    }
+}

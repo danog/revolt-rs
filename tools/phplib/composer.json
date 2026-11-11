@@ -1,0 +1,9 @@
+{
+    "description": "The PHP library revolt-rs implements, for the reflection reference dump, the baseline test run and the benchmarks",
+    "require": {
+        "revolt/event-loop": "1.0.9"
+    },
+    "config": {
+        "optimize-autoloader": true
+    }
+}

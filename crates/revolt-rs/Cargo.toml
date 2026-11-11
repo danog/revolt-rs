@@ -1,0 +1,17 @@
+[package]
+name = "revolt-rs"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "MIT"
+repository = "https://github.com/danog/revolt-rs"
+description = "revolt/event-loop implemented natively in Rust, embeddable in any Rust PHP extension"
+
+[dependencies]
+# module plumbing and the Zend Engine bindings; only its wrapper.c is compiled (no C libraries).
+# `observer` makes its bindings include zend_observer.h, hence zend_fibers.h.
+ext-php-rs = { version = "=0.16.4", default-features = false, features = ["runtime", "observer"] }
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Networking_WinSock", "Win32_System_LibraryLoader", "Win32_System_Threading", "Win32_System_Performance", "Win32_Storage_FileSystem", "Win32_System_Pipes", "Win32_System_IO"] }
