@@ -62,7 +62,8 @@ jobs:
       - name: libclang (for the Zend Engine bindings) and the build's PHP
         run: |
           case "$RUNNER_OS" in
-            Linux)   sudo apt-get install -y -qq libclang-dev ;;
+            # the runner image has clang (and libclang); install it only if it is missing
+            Linux)   ls /usr/lib/llvm-*/lib/libclang.so* >/dev/null 2>&1 || { sudo apt-get update -qq && sudo apt-get install -y -qq libclang-dev; } ;;
             macOS)   echo "LIBCLANG_PATH=$(xcode-select -p)/Toolchains/XcodeDefault.xctoolchain/usr/lib" >> "$GITHUB_ENV" ;;
             Windows) echo "LIBCLANG_PATH=C:\\Program Files\\LLVM\\bin" >> "$GITHUB_ENV" ;;
           esac
@@ -75,6 +76,7 @@ jobs:
           fi
 
       - name: Build
+        id: build
         run: |
           cargo build --locked --profile fast -p revolt-ext
           case "$RUNNER_OS" in
@@ -87,23 +89,28 @@ jobs:
           test "$(php -n -r 'echo (int) PHP_ZTS;')" = ${{ matrix.ts == 'zts' && 1 || 0 }}
 
       - name: Install the test harness and the PHP library
+        id: harness
         run: |
           (cd tests && composer install --no-interaction --no-progress -q)
           (cd tools/phplib && composer install --no-interaction --no-progress -q)
 
       - name: Reflection parity with revolt/event-loop
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.harness.outcome == 'success' }}
         run: |
           php -n tools/dump-api.php phplib > reference.json
           php -n -d "extension=$EXT" tools/dump-api.php > extension.json
           php -n tools/dump-api.php diff reference.json extension.json
 
       - name: Suites (tests/revolt + tests/native) against the extension
+        # each suite runs even when an earlier one failed (to tell a regression from the runner)
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.harness.outcome == 'success' }}
         env:
           PHP: php
           REVOLT_TEST_SCAN_DIR: "1"
         run: tools/test.sh --log-junit extension.xml
 
       - name: Suites against the PHP library (baseline)
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.harness.outcome == 'success' }}
         env:
           PHP: php
           REVOLT_TEST_SCAN_DIR: "1"
@@ -112,6 +119,7 @@ jobs:
         run: tools/test.sh --log-junit baseline.xml
 
       - name: Embedding (examples/embedder, tests/embedder)
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.harness.outcome == 'success' }}
         env:
           TEST_PHP: php
           REVOLT_TEST_SCAN_DIR: "1"
@@ -153,7 +161,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: asan-php-${{ matrix.php }}
-      - run: sudo apt-get install -y -qq libclang-dev
+      - run: ls /usr/lib/llvm-*/lib/libclang.so* >/dev/null 2>&1 || { sudo apt-get update -qq && sudo apt-get install -y -qq libclang-dev; }
       - name: Build with -Zsanitizer=address
         run: tools/asan.sh build
       - name: Suites under ASan (reports fail the job)
@@ -196,7 +204,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: pie-php-${{ matrix.php }}-${{ matrix.ts }}
-      - run: sudo apt-get install -y -qq libclang-dev
+      - run: ls /usr/lib/llvm-*/lib/libclang.so* >/dev/null 2>&1 || { sudo apt-get update -qq && sudo apt-get install -y -qq libclang-dev; }
       # the phpize/configure/make path PIE takes when no pre-built binary matches
       - name: pie build
         run: |
