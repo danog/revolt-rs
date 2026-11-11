@@ -1,0 +1,179 @@
+name: Release binaries
+
+# Pre-built binaries for PIE (`pie install danog/revolt-rs`), attached to each
+# GitHub release under the names PIE looks for (docs/extension-maintainers.md of php/pie):
+#   Linux/macOS: php_revolt-<tag>_php<X.Y>-<arch>-<os>-<libc>[-zts].zip, holding revolt.so
+#   Windows:     php_revolt-<tag>-<X.Y>-<nts|ts>-<compiler>-x86_64.zip, holding a .dll of the same name
+# for NTS and thread-safe (ZTS) PHP alike.
+# Where no binary matches, PIE builds from source (config.m4 + Makefile.frag run cargo).
+#
+# The build jobs run third-party code (cargo build scripts, the PHP images) and get a read-only
+# token, never persisted in the checkout; only the upload job, which runs no build code, may write.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to build and upload binaries for"
+        required: true
+
+permissions:
+  contents: read
+
+env:
+  TAG: ${{ github.event.release.tag_name || inputs.tag }}
+
+jobs:
+  linux:
+    name: "Linux ${{ matrix.arch }} ${{ matrix.libc }} / PHP ${{ matrix.php }} ${{ matrix.ts }}"
+    runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ["8.2", "8.3", "8.4", "8.5", "8.6"]
+        ts: [nts, zts]
+        arch: [x86_64, arm64]
+        libc: [glibc, musl]
+        # the official 8.6 images are thread-safe only
+        exclude:
+          - { php: "8.6", ts: nts }
+    steps:
+      - name: Check the tag name
+        run: |
+          case "$TAG" in ""|*[!A-Za-z0-9._-]*) echo "unexpected tag name: $TAG" >&2; exit 1 ;; esac
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ env.TAG }}
+          persist-credentials: false
+      - name: Build in the official PHP image
+        run: |
+          # <X.Y>-cli: NTS, <X.Y>-zts: ZTS; 8.6 is still a release candidate and its "cli" images are ZTS
+          case "${{ matrix.php }}-${{ matrix.ts }}" in
+            8.6-zts) tag=8.6-rc-cli ;;
+            *-zts)   tag=${{ matrix.php }}-zts ;;
+            *)       tag=${{ matrix.php }}-cli ;;
+          esac
+          image=php:$tag-${{ matrix.libc == 'musl' && 'alpine' || 'bookworm' }}
+          docker run --rm -v "$PWD:/src" -w /src -e EXPECT_ZTS=${{ matrix.ts == 'zts' && 1 || 0 }} "$image" sh tools/release/build-linux.sh revolt.so
+      - name: Package
+        run: |
+          asset=$(echo "php_revolt-${TAG}_php${{ matrix.php }}-${{ matrix.arch }}-linux-${{ matrix.libc }}${{ matrix.ts == 'zts' && '-zts' || '' }}.zip" | tr 'A-Z' 'a-z')
+          mkdir dist && zip -j "dist/$asset" revolt.so
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: linux-${{ matrix.arch }}-${{ matrix.libc }}-php${{ matrix.php }}-${{ matrix.ts }}
+          path: dist/*.zip
+          if-no-files-found: error
+
+  macos:
+    name: "macOS ${{ matrix.arch }} / PHP ${{ matrix.php }} ${{ matrix.ts }}"
+    runs-on: ${{ matrix.arch == 'arm64' && 'macos-15' || 'macos-15-intel' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ["8.2", "8.3", "8.4", "8.5", "8.6"]
+        ts: [nts, zts]
+        arch: [arm64, x86_64]
+    steps:
+      - name: Check the tag name
+        run: |
+          case "$TAG" in ""|*[!A-Za-z0-9._-]*) echo "unexpected tag name: $TAG" >&2; exit 1 ;; esac
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ env.TAG }}
+          persist-credentials: false
+      - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # v2
+        env:
+          phpts: ${{ matrix.ts }}
+        with:
+          php-version: ${{ matrix.php }}
+          coverage: none
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      - name: Build and package
+        run: |
+          export LIBCLANG_PATH=$(xcode-select -p)/Toolchains/XcodeDefault.xctoolchain/usr/lib
+          PHP=$(command -v php) PHP_CONFIG=$(command -v php-config) cargo build --release --locked -p revolt-ext
+          cp target/release/librevolt.dylib revolt.so
+          php -n -d "extension=$PWD/revolt.so" -r 'echo "revolt ", phpversion("revolt"), "\n";'
+          test "$(php -n -r 'echo (int) PHP_ZTS;')" = ${{ matrix.ts == 'zts' && 1 || 0 }}
+          asset=$(echo "php_revolt-${TAG}_php${{ matrix.php }}-${{ matrix.arch }}-darwin-bsdlibc${{ matrix.ts == 'zts' && '-zts' || '' }}.zip" | tr 'A-Z' 'a-z')
+          mkdir dist && zip -j "dist/$asset" revolt.so
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: macos-${{ matrix.arch }}-php${{ matrix.php }}-${{ matrix.ts }}
+          path: dist/*.zip
+          if-no-files-found: error
+
+  windows:
+    name: "Windows x86_64 / PHP ${{ matrix.php }} ${{ matrix.ts }}"
+    runs-on: windows-2022
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ["8.2", "8.3", "8.4", "8.5", "8.6"]
+        ts: [nts, ts]
+        # no Windows development pack is published for 8.6 before its release
+        exclude:
+          - { php: "8.6" }
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check the tag name
+        run: |
+          case "$TAG" in ""|*[!A-Za-z0-9._-]*) echo "unexpected tag name: $TAG" >&2; exit 1 ;; esac
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ env.TAG }}
+          persist-credentials: false
+      - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # v2
+        env:
+          phpts: ${{ matrix.ts }}
+        with:
+          php-version: ${{ matrix.php }}
+          coverage: none
+      # ext-php-rs uses the vectorcall ABI there, which only nightly Rust has (pinned as in CI)
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: nightly-2026-09-02
+      - name: Build and package
+        run: |
+          export LIBCLANG_PATH='C:\Program Files\LLVM\bin'
+          export PHP=$(cygpath -w "$(command -v php.exe)")
+          cargo build --release --locked -p revolt-ext
+          # "PHP Extension Build => API20240924,NTS,VS17" (TS builds: ",TS,") -> vs17
+          compiler=$(php -i | sed -n 's/^PHP Extension Build => .*,\(VS[0-9]*\)$/\1/p' | tr 'A-Z' 'a-z')
+          test -n "$compiler"
+          test "$(php -n -r 'echo (int) PHP_ZTS;')" = ${{ matrix.ts == 'ts' && 1 || 0 }}
+          name=php_revolt-${TAG}-${{ matrix.php }}-${{ matrix.ts }}-${compiler}-x86_64
+          cp target/release/revolt.dll "$name.dll"
+          php -n -d "extension=$(cygpath -ml "$PWD/$name.dll")" -r 'echo "revolt ", phpversion("revolt"), "\n";'
+          mkdir dist && 7z a -tzip "dist/$name.zip" "$name.dll" > /dev/null
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: windows-x86_64-php${{ matrix.php }}-${{ matrix.ts }}
+          path: dist/*.zip
+          if-no-files-found: error
+
+  upload:
+    name: Upload to the release
+    needs: [linux, macos, windows]
+    # every binary that was built is uploaded, even if another build failed
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Check the tag name
+        run: |
+          case "$TAG" in ""|*[!A-Za-z0-9._-]*) echo "unexpected tag name: $TAG" >&2; exit 1 ;; esac
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Upload
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$TAG" dist/*.zip --clobber --repo "$GITHUB_REPOSITORY"

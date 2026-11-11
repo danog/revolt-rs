@@ -1,0 +1,203 @@
+name: Tests
+
+# Every OS, PHP 8.2 to 8.6, NTS and ZTS: the build, Reflection parity with the PHP library,
+# revolt/event-loop's own suite (tests/revolt) and ours (tests/native) against the extension, the
+# same suites against the PHP library (the baseline: tests/native's parity tests must pass on
+# both), and the embedding tests (examples/embedder: tests/embedder). ASan on Linux.
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: "${{ matrix.os }} / PHP ${{ matrix.php }}${{ matrix.ts == 'zts' && ' ZTS' || '' }}"
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15, windows-2022]
+        php: ["8.2", "8.3", "8.4", "8.5", "8.6"]
+        ts: [nts, zts]
+        exclude:
+          # no Windows development pack is published for 8.6 before its release
+          - { os: windows-2022, php: "8.6" }
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        env:
+          phpts: ${{ matrix.ts == 'zts' && 'zts' || 'nts' }}
+        with:
+          php-version: ${{ matrix.php }}
+          tools: composer
+          # ev and event: their driver classes' tests (ext-uv has no maintained PECL release for
+          # every version); pcntl and posix: the signal and fork tests (Unix)
+          extensions: ${{ startsWith(matrix.os, 'windows') && 'sockets' || 'ev, sockets, event, pcntl, posix' }}
+          ini-values: zend.assertions=1
+          coverage: none
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          # Windows: ext-php-rs uses the vectorcall ABI of PHP's ZEND_FASTCALL functions, which
+          # only nightly Rust has (a fixed nightly, so that builds are reproducible)
+          toolchain: ${{ startsWith(matrix.os, 'windows') && 'nightly-2026-09-02' || 'stable' }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: php-${{ matrix.php }}-${{ matrix.ts }}
+
+      - name: libclang (for the Zend Engine bindings) and the build's PHP
+        run: |
+          case "$RUNNER_OS" in
+            Linux)   sudo apt-get install -y -qq libclang-dev ;;
+            macOS)   echo "LIBCLANG_PATH=$(xcode-select -p)/Toolchains/XcodeDefault.xctoolchain/usr/lib" >> "$GITHUB_ENV" ;;
+            Windows) echo "LIBCLANG_PATH=C:\\Program Files\\LLVM\\bin" >> "$GITHUB_ENV" ;;
+          esac
+          if [ "$RUNNER_OS" = Windows ]; then
+            # php.exe as a Windows path (build.rs and ext-php-rs run it; there is no php-config)
+            echo "PHP=$(cygpath -w "$(command -v php.exe)")" >> "$GITHUB_ENV"
+          else
+            echo "PHP=$(command -v php)" >> "$GITHUB_ENV"
+            echo "PHP_CONFIG=$(command -v php-config)" >> "$GITHUB_ENV"
+          fi
+
+      - name: Build
+        run: |
+          cargo build --locked --profile fast -p revolt-ext
+          case "$RUNNER_OS" in
+            Linux)   ext=$PWD/target/fast/librevolt.so ;;
+            macOS)   ext=$PWD/target/fast/librevolt.dylib ;;
+            Windows) ext=$(cygpath -m "$PWD/target/fast/revolt.dll") ;;
+          esac
+          echo "EXT=$ext" >> "$GITHUB_ENV"
+          php -n -d "extension=$ext" -r 'echo "revolt ", phpversion("revolt"), PHP_ZTS ? " (ZTS)" : "", "\n";'
+          test "$(php -n -r 'echo (int) PHP_ZTS;')" = ${{ matrix.ts == 'zts' && 1 || 0 }}
+
+      - name: Install the test harness and the PHP library
+        run: |
+          (cd tests && composer install --no-interaction --no-progress -q)
+          (cd tools/phplib && composer install --no-interaction --no-progress -q)
+
+      - name: Reflection parity with revolt/event-loop
+        run: |
+          php -n tools/dump-api.php phplib > reference.json
+          php -n -d "extension=$EXT" tools/dump-api.php > extension.json
+          php -n tools/dump-api.php diff reference.json extension.json
+
+      - name: Suites (tests/revolt + tests/native) against the extension
+        env:
+          PHP: php
+          REVOLT_TEST_SCAN_DIR: "1"
+        run: tools/test.sh --log-junit extension.xml
+
+      - name: Suites against the PHP library (baseline)
+        env:
+          PHP: php
+          REVOLT_TEST_SCAN_DIR: "1"
+          REVOLT_RS_PHPLIB: "1"
+        # the NOT_APPLICABLE tests are excluded here too; tests/native's divergence tests skip
+        run: tools/test.sh --log-junit baseline.xml
+
+      - name: Embedding (examples/embedder, tests/embedder)
+        env:
+          TEST_PHP: php
+          REVOLT_TEST_SCAN_DIR: "1"
+          CARGO_FLAGS: --locked
+        run: tools/embed-test.sh --log-junit embedder.xml
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: results-${{ matrix.os }}-php${{ matrix.php }}-${{ matrix.ts }}
+          path: |
+            extension.xml
+            baseline.xml
+            embedder.xml
+            extension.json
+          if-no-files-found: ignore
+
+  asan:
+    name: "ASan (ubuntu-24.04 / PHP ${{ matrix.php }})"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ["8.2", "8.5"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          tools: composer
+          extensions: pcntl, posix, sockets
+          ini-values: zend.assertions=1
+          coverage: none
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2026-09-02
+          components: rust-src
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: asan-php-${{ matrix.php }}
+      - run: sudo apt-get install -y -qq libclang-dev
+      - name: Build with -Zsanitizer=address
+        run: tools/asan.sh build
+      - name: Suites under ASan (reports fail the job)
+        env:
+          REVOLT_TEST_SCAN_DIR: "1"
+        run: |
+          (cd tests && composer install --no-interaction --no-progress -q)
+          tools/asan.sh test
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: asan-php${{ matrix.php }}
+          path: target/asan-results
+          if-no-files-found: ignore
+
+  pie:
+    name: "PIE build from source (ubuntu-24.04 / PHP ${{ matrix.php }} ${{ matrix.ts }})"
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ["8.2", "8.3", "8.4", "8.5", "8.6"]
+        ts: [nts]
+        include:
+          - { php: "8.4", ts: zts }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        env:
+          phpts: ${{ matrix.ts }}
+        with:
+          php-version: ${{ matrix.php }}
+          tools: pie
+          coverage: none
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: pie-php-${{ matrix.php }}-${{ matrix.ts }}
+      - run: sudo apt-get install -y -qq libclang-dev
+      # the phpize/configure/make path PIE takes when no pre-built binary matches
+      - name: pie build
+        run: |
+          pie repository:add path "$PWD"
+          pie build 'danog/revolt-rs:*@dev' | tee pie.log
+          so=$(sed -n 's/^Build complete: //p' pie.log | tail -1)
+          test -f "$so"
+          php -n -d "extension=$so" -r 'echo "revolt ", phpversion("revolt"), "\n"; var_dump((new ReflectionClass(Revolt\EventLoop::class))->isInternal());'
