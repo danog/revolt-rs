@@ -90,6 +90,16 @@ ASan 8.5, PIE 8.4/8.4 ZTS passed. Windows 8.3 ZTS and 8.4 ZTS failed only
 bound ≥ 1.5; the 8.4 ZTS one in the PHP-library baseline): Windows' usleep() (a waitable timer)
 returns a few ms early → flaky upstream test on Windows runners.
 
+Also in 43054345552: ASan 8.2 passed with the deepbind shim (525 tests, "ASan: no reports",
+embed 10/2 skipped), so ASan stays on 8.2 + 8.5.
+
+f5b6ed6 + 5d6217b: `REVOLT_TEST_CI_EXCLUDE=macos|windows` (set by the workflow per OS) makes
+tools/test.sh also exclude `tests/ci-excluded/<name>.md` (same list format as NOT_APPLICABLE.md;
+an entry `::method` matches every driver class); macOS: testCorrectTimeoutIfBlockingBefore
+{Delay,Activate}, Windows: ...BeforeDelay. `taskpolicy -a` removed; the informational timer step
+now runs on macOS and Windows and prints usleep()'s deviation per hrtime() and microtime().
+Run 43057031372 (5d6217b): pending.
+
 Maintainer decision (macOS; applied to Windows the same way): upstream timing tests failing on
 CI runners because of the OS's timer behaviour (the PHP library fails them too) are excluded on
 that CI only, through an env-gated list in tools/test.sh with the measured deviation as the
