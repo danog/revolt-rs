@@ -81,6 +81,17 @@ changes).
 6. Performance passes once benchmarks exist (e.g. epoll_pwait2, avoiding the id-string
    allocation per callback, caching `callee_of`).
 
+## Preliminary numbers (fast profile, not LTO; PHP 8.5 NTS, Apple Silicon, no opcache)
+
+Quick script (not yet in tools/bench): 1M EventLoop::defer + run, 200k {main} and fiber
+suspend/resume round trips through EventLoop::queue($s->resume(...)):
+
+| | native | PHP StreamSelectDriver |
+|---|---|---|
+| defer | 1.12 M/s | 0.40 M/s |
+| {main} suspend/resume | 4.02 M/s | 1.29 M/s |
+| fiber suspend/resume | 3.12 M/s | 1.51 M/s |
+
 ## Open problems / notes
 
 - `zend::zval::Z` = `ManuallyDrop<sys::zval>`: ext-php-rs gives `sys::zval` a Drop that releases;
