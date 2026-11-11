@@ -42,14 +42,31 @@ EMBEDDING.md, DIVERGENCES.md.
 
 ## Results (local, this Mac)
 
-- PHP 8.5 with ev/event/uv: 519 tests = carried 470 pass (+1 NOT_APPLICABLE excluded), native
-  39 (38 pass, 1 Windows-only skip), embedder 10 (skipped by tools/test.sh without the env;
-  10/10 by tools/embed-test.sh). Baseline against the PHP library: all pass (divergence tests
-  skip). 8.2/8.3/8.4: same counts, API dump identical.
-- ASan (macOS, nightly): `tools/asan.sh test`: no reports; the 8 subprocess tests (6 phpt,
-  SetDriverTest's 2 separate-process tests) cannot run under ASan on macOS (SIP strips DYLD_*
-  in /bin/sh) — the phpt bodies were run under ASan by hand: clean. `tools/asan.sh embed`: 8
-  pass, 2 skip (no instrumented mismatch builds), no reports.
+- PHP 8.5 with ev/event/uv: 525 tests = carried 470 pass (+1 NOT_APPLICABLE excluded), native
+  45 (44 pass, 1 Windows-only skip), embedder 10 (skipped by tools/test.sh without the env;
+  10/10 by tools/embed-test.sh, also on 8.2). Baseline against the PHP library: all pass
+  (divergence tests skip). 8.2/8.3/8.4: pass.
+- ASan (macOS, nightly): `tools/asan.sh test`: no reports; the 9 subprocess tests (6 phpt,
+  SetDriverTest's 3 separate-process tests) cannot run under ASan on macOS (SIP strips DYLD_*
+  in /bin/sh): they fail there without reports; their bodies were run by hand under ASan:
+  clean. `tools/asan.sh embed`: 8 pass, 2 skip (no instrumented mismatch builds), no reports.
+- Benchmarks re-measured at 3218edf (README).
+
+## CI (first runs on GitHub)
+
+The first run (f5552ad) failed everywhere; fixed since:
+- Linux: `apt-get install libclang-dev` hit a DNS failure; the runner image already has
+  libclang, which is now used when present.
+- PHP 8.6: setup-php's 8.6 has API 20261112 (php-src bumped it after RC2); ext-php-rs-build
+  0.2.0 only accepts 20260924 → `patches/ext-php-rs-build` + `[patch.crates-io]` (remove once
+  an ext-php-rs-build release accepts it; embedders need the same patch).
+- Windows: link errors for zend_ce_closure/module_registry/zend_empty_string (our own extern
+  block in zend/sys.rs had no `#[link(name = "php8[ts]")]`, so no `__imp_` import).
+- macOS: upstream's timing tests (`testCorrectTimeoutIfBlocking*`, `testTimerIntervalCounted*`)
+  overshot their 100 ms bounds: macOS timer coalescing of nanosleep()/kevent timeouts (5–10%,
+  more on CI). Timed waits now use a one-shot EVFILT_TIMER with NOTE_CRITICAL (precise to
+  ~0.1 ms locally, was ~10 ms on a 200 ms timer).
+- Every suite step now runs even when an earlier one failed.
 
 ## How to build and test
 
@@ -67,8 +84,9 @@ patterns. Do not rebuild a target dir while a test run uses it.
 
 ## Next steps
 
-1. Push to a remote (maintainer) and fix what CI finds: Windows has only been type-checked;
-   the Linux ASan job may hit PHP's RTLD_DEEPBIND (see Open problems).
+1. Check the CI run of the latest push once; fix what remains (Windows has never run the
+   suites; the Linux ASan job has never run: PHP's CLI loads extensions without RTLD_DEEPBIND
+   since 8.2 (zend_dl_use_deepbind), which ASan would refuse).
 2. Integrate the embedding into danog/mongo-php-async-driver (separate step), then its workload
    benchmark.
 3. Performance passes (e.g. epoll_pwait2, avoiding the id-string allocation per callback,
