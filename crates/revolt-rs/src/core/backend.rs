@@ -9,6 +9,9 @@
 //!   reports them.
 //! - fork(): a child rebuilds its poller on first use (an inherited epoll instance is shared with
 //!   the parent; kqueues are not inherited).
+//! - macOS: timed waits go through a one-shot EVFILT_TIMER with NOTE_CRITICAL (kqueue even when
+//!   no fd is watched): the system's timer coalescing otherwise delays nanosleep()/kevent()
+//!   wake-ups by up to 10% of the timeout (more for background processes).
 
 use std::collections::HashMap;
 use std::sync::atomic::AtomicU64;
@@ -72,7 +75,14 @@ pub struct Reactor {
     events: Vec<libc::epoll_event>,
     #[cfg(all(unix, not(target_os = "linux")))]
     events: Vec<libc::kevent>,
+    /// macOS: the one-shot wait timer may still be armed (an fd woke the last wait first)
+    #[cfg(target_os = "macos")]
+    timer_armed: bool,
 }
+
+/// macOS: the ident of the wait timer (EVFILT_TIMER idents are not fds)
+#[cfg(target_os = "macos")]
+const WAIT_TIMER: usize = usize::MAX;
 
 /// A ready fd: (fd, readable, writable)
 pub type Ready = (i64, bool, bool);
@@ -89,6 +99,8 @@ impl Reactor {
             wake: -1,
             #[cfg(unix)]
             events: Vec::new(),
+            #[cfg(target_os = "macos")]
+            timer_armed: false,
         }
     }
 
@@ -173,6 +185,10 @@ impl Reactor {
         #[cfg(unix)]
         {
             let mut woke = false;
+            #[cfg(target_os = "macos")]
+            if timeout.is_some_and(|t| t > 0.0) {
+                self.ensure_poller();
+            }
             if self.poller < 0 {
                 // nothing registered with a poller: sleep
                 sleep(timeout);
@@ -198,6 +214,10 @@ impl Reactor {
                 libc::close(self.poller)
             };
             self.poller = -1;
+            #[cfg(target_os = "macos")]
+            {
+                self.timer_armed = false;
+            }
         }
         for (&fd, e) in self.fds.iter_mut() {
             e.registered = 0;
@@ -384,12 +404,13 @@ impl Reactor {
 
     #[cfg(all(unix, not(target_os = "linux")))]
     fn poll_os(&mut self, timeout: Option<f64>, out: &mut Vec<Ready>, woke: &mut bool) {
-        let n = (2 * self.fds.len() + 1).min(1024);
+        let n = (2 * self.fds.len() + 2).min(1024);
         if self.events.len() < n {
             self.events.resize(n, unsafe { std::mem::zeroed() });
         }
         let ts;
-        let tsp = match timeout {
+        #[cfg_attr(not(target_os = "macos"), allow(unused_mut))]
+        let mut tsp = match timeout {
             None => std::ptr::null(),
             Some(t) => {
                 let t = t.max(0.0);
@@ -397,7 +418,34 @@ impl Reactor {
                 &ts as *const libc::timespec
             }
         };
-        let r = unsafe { libc::kevent(self.poller, std::ptr::null(), 0, self.events.as_mut_ptr(), self.events.len() as i32, tsp) };
+        #[cfg_attr(not(target_os = "macos"), allow(unused_mut))]
+        let mut change: libc::kevent = unsafe { std::mem::zeroed() };
+        #[cfg_attr(not(target_os = "macos"), allow(unused_mut))]
+        let mut nchanges = 0;
+        #[cfg(target_os = "macos")]
+        {
+            change.ident = WAIT_TIMER;
+            change.filter = libc::EVFILT_TIMER;
+            match timeout {
+                Some(t) if t > 0.0 => {
+                    // (re)arms the timer; the wait itself has no timeout
+                    change.flags = libc::EV_ADD | libc::EV_ONESHOT;
+                    change.fflags = libc::NOTE_NSECONDS | libc::NOTE_CRITICAL;
+                    change.data = (t * 1e9).ceil().min(i64::MAX as f64) as isize;
+                    nchanges = 1;
+                    tsp = std::ptr::null();
+                    self.timer_armed = true;
+                }
+                _ if self.timer_armed => {
+                    // a stale timer would end a later wait early (ENOENT if it fired: ignored)
+                    change.flags = libc::EV_DELETE;
+                    nchanges = 1;
+                    self.timer_armed = false;
+                }
+                _ => {}
+            }
+        }
+        let r = unsafe { libc::kevent(self.poller, &change, nchanges, self.events.as_mut_ptr(), self.events.len() as i32, tsp) };
         if r <= 0 {
             return;
         }
@@ -409,6 +457,11 @@ impl Reactor {
                 continue;
             }
             if ev.flags & libc::EV_ERROR != 0 {
+                continue;
+            }
+            #[cfg(target_os = "macos")]
+            if ev.filter == libc::EVFILT_TIMER {
+                self.timer_armed = false;
                 continue;
             }
             let rd = ev.filter == libc::EVFILT_READ;
