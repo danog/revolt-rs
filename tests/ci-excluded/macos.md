@@ -17,3 +17,6 @@ fail on those runners with the PHP library too (run 43042104542: up to 1.737 s f
   measured 1.61–1.74 s on the runners.
 - `::testCorrectTimeoutIfBlockingBeforeActivate`: a 1 s delay then a 0.5 s `usleep()`, bound
   1.1 s; measured 1.100–1.153 s on the runners.
+- `::testTimerIntervalCountedWhenNotRunning`: a 0.5 s `usleep()` before `run()` must leave a
+  1 s delay's callback under 0.5 s; measured 0.5001 s and 0.5137 s on the runners (run
+  43057031372, StreamSelectDriver, PHP library baseline; the extension passed).
