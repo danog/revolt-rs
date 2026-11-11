@@ -9,6 +9,12 @@ use Revolt\EventLoop;
 use Revolt\EventLoop\Driver;
 use Revolt\EventLoop\Driver\StreamSelectDriver;
 
+/**
+ * The global driver must be swappable: a fresh process (the suites leave it running).
+ *
+ * @runTestsInSeparateProcesses
+ * @preserveGlobalState disabled
+ */
 final class SetDriverTest extends TestCase
 {
     use NativeOnly;

@@ -37,11 +37,18 @@ pub fn is_owner() -> bool {
 
 /// MINIT: registers the Revolt classes unless another copy did; returns whether this copy owns
 /// them.
-pub unsafe fn minit(_module_number: i32) -> bool {
+pub unsafe fn minit(module_number: i32) -> bool {
+    minit_with(module_number, true)
+}
+
+/// MINIT with the choice of registering the classes: with `register_classes` false this copy
+/// never owns them and only uses whatever implements them (another revolt-rs copy, or the PHP
+/// library through the PHP-call fallback of `crate::embed`).
+pub unsafe fn minit_with(_module_number: i32, register_classes: bool) -> bool {
     crate::core::backend::minit();
     zend::fiber::minit();
     let ct = (*zend::cg()).class_table;
-    if !zend::hash::find_str(ct, b"revolt\\eventloop").is_null() {
+    if !register_classes || !zend::hash::find_str(ct, b"revolt\\eventloop").is_null() {
         return false;
     }
     classes::register_all();
@@ -58,6 +65,7 @@ pub unsafe fn rshutdown() {
     if is_owner() {
         classes::eventloop::rshutdown();
         classes::fiber_local::rshutdown();
+        zend::fiber::inflight::rshutdown();
     }
 }
 

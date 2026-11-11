@@ -42,11 +42,12 @@ pub struct Abi {
     /// The thread's driver (EventLoop::getDriver(), created if needed) when it is natively
     /// drivable; null otherwise (or with an exception pending). Borrowed.
     pub current: unsafe extern "C" fn() -> *mut sys::zend_object,
-    /// onReadable/onWritable on an OS handle (an fd; a SOCKET on Windows when `socket`)
-    pub on_handle: unsafe extern "C" fn(*mut sys::zend_object, i64, bool, bool, NativeFn, *mut c_void, Option<ReleaseFn>) -> u64,
+    /// onReadable/onWritable on an OS handle (an fd; a SOCKET on Windows when `socket`). The
+    /// callback functions take `(f, data, release, held)`: see [`NativeLoop::delay`].
+    pub on_handle: unsafe extern "C" fn(*mut sys::zend_object, i64, bool, bool, NativeFn, *mut c_void, Option<ReleaseFn>, *mut sys::zend_object) -> u64,
     /// delay ($repeat false) / repeat; 0 with an exception when the interval is negative
-    pub timer: unsafe extern "C" fn(*mut sys::zend_object, f64, bool, NativeFn, *mut c_void, Option<ReleaseFn>) -> u64,
-    pub defer: unsafe extern "C" fn(*mut sys::zend_object, NativeFn, *mut c_void, Option<ReleaseFn>) -> u64,
+    pub timer: unsafe extern "C" fn(*mut sys::zend_object, f64, bool, NativeFn, *mut c_void, Option<ReleaseFn>, *mut sys::zend_object) -> u64,
+    pub defer: unsafe extern "C" fn(*mut sys::zend_object, NativeFn, *mut c_void, Option<ReleaseFn>, *mut sys::zend_object) -> u64,
     /// a microtask: `f(data, 0)` runs before any other callback (no release: run exactly once)
     pub queue: unsafe extern "C" fn(*mut sys::zend_object, NativeFn, *mut c_void),
     pub cancel: unsafe extern "C" fn(*mut sys::zend_object, u64),
@@ -62,6 +63,12 @@ pub struct Abi {
     pub resume: unsafe extern "C" fn(*mut sys::zend_object, *mut sys::zval) -> bool,
     /// $suspension->throw($exception) (a new reference is taken); false with an exception
     pub throw: unsafe extern "C" fn(*mut sys::zend_object, *mut sys::zend_object) -> bool,
+    /// Keeps an object alive (a new reference) for the running fiber or {main}, visible to the
+    /// cycle collector as a local variable of the fiber would be, until the matching `unhold`
+    /// (LIFO, on the same fiber).
+    pub hold: unsafe extern "C" fn(*mut sys::zend_object),
+    /// Releases the last `hold` of the running fiber or {main}.
+    pub unhold: unsafe extern "C" fn(),
 }
 
 unsafe impl Sync for Abi {}
@@ -78,25 +85,26 @@ unsafe extern "C" fn abi_current() -> *mut sys::zend_object {
     d
 }
 
-unsafe fn native_cb(f: NativeFn, data: *mut c_void, release: Option<ReleaseFn>) -> Cb {
-    Cb::Native { f, data, release }
+unsafe fn native_cb(f: NativeFn, data: *mut c_void, release: Option<ReleaseFn>, held: *mut sys::zend_object) -> Cb {
+    let held = if held.is_null() { Zv::undef() } else { Zv(zval::obj_ref(held)) };
+    Cb::Native { f, data, release, held }
 }
 
-unsafe extern "C" fn abi_on_handle(d: *mut sys::zend_object, fd: i64, socket: bool, writable: bool, f: NativeFn, data: *mut c_void, release: Option<ReleaseFn>) -> u64 {
-    run::stream_handle(D(d), Handle { fd, socket, res: 0 }, native_cb(f, data, release), writable)
+unsafe extern "C" fn abi_on_handle(d: *mut sys::zend_object, fd: i64, socket: bool, writable: bool, f: NativeFn, data: *mut c_void, release: Option<ReleaseFn>, held: *mut sys::zend_object) -> u64 {
+    run::stream_handle(D(d), Handle { fd, socket, res: 0 }, native_cb(f, data, release, held), writable)
 }
 
-unsafe extern "C" fn abi_timer(d: *mut sys::zend_object, secs: f64, repeat: bool, f: NativeFn, data: *mut c_void, release: Option<ReleaseFn>) -> u64 {
+unsafe extern "C" fn abi_timer(d: *mut sys::zend_object, secs: f64, repeat: bool, f: NativeFn, data: *mut c_void, release: Option<ReleaseFn>, held: *mut sys::zend_object) -> u64 {
     if secs < 0.0 {
-        drop(native_cb(f, data, release));
+        drop(native_cb(f, data, release, held));
         call::throw_error(if repeat { "Interval must be greater than or equal to zero" } else { "Delay must be greater than or equal to zero" });
         return 0;
     }
-    run::timer(D(d), secs, native_cb(f, data, release), repeat).unwrap_or(0)
+    run::timer(D(d), secs, native_cb(f, data, release, held), repeat).unwrap_or(0)
 }
 
-unsafe extern "C" fn abi_defer(d: *mut sys::zend_object, f: NativeFn, data: *mut c_void, release: Option<ReleaseFn>) -> u64 {
-    run::defer(D(d), native_cb(f, data, release))
+unsafe extern "C" fn abi_defer(d: *mut sys::zend_object, f: NativeFn, data: *mut c_void, release: Option<ReleaseFn>, held: *mut sys::zend_object) -> u64 {
+    run::defer(D(d), native_cb(f, data, release, held))
 }
 
 unsafe extern "C" fn abi_queue(d: *mut sys::zend_object, f: NativeFn, data: *mut c_void) {
@@ -147,12 +155,36 @@ unsafe extern "C" fn abi_throw(s: *mut sys::zend_object, e: *mut sys::zend_objec
     !call::has_exception()
 }
 
+// test builds only (tools/embed-test.sh): an owner whose table another copy must refuse
+#[cfg(feature = "test-abi-major-mismatch")]
+const EXPORTED_MAJOR: u32 = ABI_MAJOR + 1;
+#[cfg(not(feature = "test-abi-major-mismatch"))]
+const EXPORTED_MAJOR: u32 = ABI_MAJOR;
+#[cfg(feature = "test-abi-size-mismatch")]
+const EXPORTED_SIZE: usize = std::mem::size_of::<Abi>() - std::mem::size_of::<usize>();
+#[cfg(not(feature = "test-abi-size-mismatch"))]
+const EXPORTED_SIZE: usize = std::mem::size_of::<Abi>();
+
+unsafe extern "C" fn abi_hold(o: *mut sys::zend_object) {
+    let f = crate::zend::active_fiber();
+    if !f.is_null() {
+        crate::zend::fiber::inflight::track(f);
+    }
+    crate::zend::fiber::inflight::hold(f, vec![zval::obj_ref(o)]);
+}
+
+unsafe extern "C" fn abi_unhold() {
+    for mut z in crate::zend::fiber::inflight::take(crate::zend::active_fiber()) {
+        zval::dtor(&mut z);
+    }
+}
+
 /// This copy's table (exported for the other copies).
 #[no_mangle]
 #[used]
 pub static revolt_rs_abi_v1: Abi = Abi {
-    size: std::mem::size_of::<Abi>(),
-    abi_major: ABI_MAJOR,
+    size: EXPORTED_SIZE,
+    abi_major: EXPORTED_MAJOR,
     abi_minor: ABI_MINOR,
     version: concat!(env!("CARGO_PKG_VERSION"), "\0").as_ptr() as *const c_char,
     revolt_version: c"1.0.9".as_ptr(),
@@ -170,6 +202,8 @@ pub static revolt_rs_abi_v1: Abi = Abi {
     suspend: abi_suspend,
     resume: abi_resume,
     throw: abi_throw,
+    hold: abi_hold,
+    unhold: abi_unhold,
 };
 
 struct AbiRef(Option<&'static Abi>);
@@ -272,24 +306,33 @@ impl NativeLoop {
         self.driver
     }
 
-    pub unsafe fn on_readable(&self, fd: i64, socket: bool, cb: NativeFn, data: *mut c_void, release: Option<ReleaseFn>) -> u64 {
-        (self.abi.on_handle)(self.driver, fd, socket, false, cb, data, release)
+    /// onReadable(): `cb(data, id)` while the OS handle (an fd; a SOCKET on Windows when
+    /// `socket`) is readable. See [`NativeLoop::delay`] for the other arguments.
+    pub unsafe fn on_readable(&self, fd: i64, socket: bool, cb: NativeFn, data: *mut c_void, release: Option<ReleaseFn>, held: *mut sys::zend_object) -> u64 {
+        (self.abi.on_handle)(self.driver, fd, socket, false, cb, data, release, held)
     }
 
-    pub unsafe fn on_writable(&self, fd: i64, socket: bool, cb: NativeFn, data: *mut c_void, release: Option<ReleaseFn>) -> u64 {
-        (self.abi.on_handle)(self.driver, fd, socket, true, cb, data, release)
+    pub unsafe fn on_writable(&self, fd: i64, socket: bool, cb: NativeFn, data: *mut c_void, release: Option<ReleaseFn>, held: *mut sys::zend_object) -> u64 {
+        (self.abi.on_handle)(self.driver, fd, socket, true, cb, data, release, held)
     }
 
-    pub unsafe fn delay(&self, secs: f64, cb: NativeFn, data: *mut c_void, release: Option<ReleaseFn>) -> u64 {
-        (self.abi.timer)(self.driver, secs, false, cb, data, release)
+    /// delay(): `cb(data, id)` once after `secs`. `release(data)` (optional) runs exactly once
+    /// when the callback is gone (after it fired once, cancelled, or with its driver). `held`
+    /// (nullable) is an object the callback keeps alive — a new reference is taken, released
+    /// after `release` — and reports to PHP's cycle collector: pass the suspension the callback
+    /// resumes there (not a reference owned by `data`), so that a fiber waiting on a driver
+    /// that became garbage is collected as with PHP closures. Returns the id (0 with an
+    /// exception pending).
+    pub unsafe fn delay(&self, secs: f64, cb: NativeFn, data: *mut c_void, release: Option<ReleaseFn>, held: *mut sys::zend_object) -> u64 {
+        (self.abi.timer)(self.driver, secs, false, cb, data, release, held)
     }
 
-    pub unsafe fn repeat(&self, secs: f64, cb: NativeFn, data: *mut c_void, release: Option<ReleaseFn>) -> u64 {
-        (self.abi.timer)(self.driver, secs, true, cb, data, release)
+    pub unsafe fn repeat(&self, secs: f64, cb: NativeFn, data: *mut c_void, release: Option<ReleaseFn>, held: *mut sys::zend_object) -> u64 {
+        (self.abi.timer)(self.driver, secs, true, cb, data, release, held)
     }
 
-    pub unsafe fn defer(&self, cb: NativeFn, data: *mut c_void, release: Option<ReleaseFn>) -> u64 {
-        (self.abi.defer)(self.driver, cb, data, release)
+    pub unsafe fn defer(&self, cb: NativeFn, data: *mut c_void, release: Option<ReleaseFn>, held: *mut sys::zend_object) -> u64 {
+        (self.abi.defer)(self.driver, cb, data, release, held)
     }
 
     pub unsafe fn queue(&self, f: NativeFn, data: *mut c_void) {
@@ -337,6 +380,19 @@ impl NativeLoop {
 
     pub unsafe fn throw(&self, s: *mut sys::zend_object, e: *mut sys::zend_object) -> bool {
         (self.abi.throw)(s, e)
+    }
+
+    /// Keeps `o` alive for the running fiber (or {main}) where PHP's cycle collector sees it,
+    /// until the matching [`NativeLoop::unhold`] on the same fiber. A reference a native frame
+    /// owns while its fiber is suspended is invisible to the collector: a fiber waiting on a
+    /// driver that became garbage could never be collected. Hold the suspension instead of
+    /// owning it (see EMBEDDING.md, "Waiting").
+    pub unsafe fn hold(&self, o: *mut sys::zend_object) {
+        (self.abi.hold)(o)
+    }
+
+    pub unsafe fn unhold(&self) {
+        (self.abi.unhold)()
     }
 }
 

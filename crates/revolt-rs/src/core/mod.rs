@@ -84,7 +84,9 @@ pub type ReleaseFn = unsafe extern "C" fn(data: *mut c_void);
 
 pub enum Cb {
     Php { closure: Zv, callee: Callee },
-    Native { f: NativeFn, data: *mut c_void, release: Option<ReleaseFn> },
+    /// `held`: an object the callback keeps alive (one reference), reported to the cycle
+    /// collector (e.g. the suspension the callback resumes); released after `release`
+    Native { f: NativeFn, data: *mut c_void, release: Option<ReleaseFn>, held: Zv },
     /// moved out for an invocation (a fired defer/delay)
     Taken,
 }
@@ -297,8 +299,10 @@ impl Core {
     /// Reports every zval held to the cycle collector.
     pub fn gc(&mut self, add: &mut dyn FnMut(*mut sys::zval)) {
         for r in self.callbacks.values_mut() {
-            if let Cb::Php { closure, .. } = &mut r.cb {
-                add(&mut *closure.0);
+            match &mut r.cb {
+                Cb::Php { closure, .. } => add(&mut *closure.0),
+                Cb::Native { held, .. } => add(&mut *held.0),
+                Cb::Taken => {}
             }
             add(&mut *r.stream.0);
             if !r.view.is_null() {

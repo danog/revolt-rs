@@ -756,16 +756,16 @@ unsafe fn invoke_callback(d: D, id: u64) -> bool {
     }
     let kind = r.kind;
     let fired_once = matches!(kind, Kind::Defer | Kind::Delay);
-    let native = match &r.cb {
+    let native = match &mut r.cb {
         Cb::Php { .. } => None,
-        Cb::Native { f, data, release } => {
+        Cb::Native { f, data, release, held } => {
             if fired_once {
                 // invoked after its cancel(): its data is released after the call
-                let cb = Cb::Native { f: *f, data: *data, release: *release };
+                let cb = Cb::Native { f: *f, data: *data, release: *release, held: Zv(held.take()) };
                 std::mem::forget(std::mem::replace(&mut r.cb, Cb::Taken));
                 Some(cb)
             } else {
-                Some(Cb::Native { f: *f, data: *data, release: None })
+                Some(Cb::Native { f: *f, data: *data, release: None, held: Zv::undef() })
             }
         }
         Cb::Taken => return true,

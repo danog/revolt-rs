@@ -12,5 +12,8 @@
             <directory>native</directory>
             <directory suffix=".phpt">native</directory>
         </testsuite>
+        <testsuite name="embedder">
+            <directory>embedder</directory>
+        </testsuite>
     </testsuites>
 </phpunit>

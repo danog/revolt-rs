@@ -15,3 +15,9 @@ libc = "0.2"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Networking_WinSock", "Win32_System_LibraryLoader", "Win32_System_Threading", "Win32_System_Performance", "Win32_Storage_FileSystem", "Win32_System_Pipes", "Win32_System_IO"] }
+
+[features]
+# test builds only: the exported ABI table advertises another major version / a smaller size, so
+# that the other copies must refuse it (tools/embed-test.sh)
+test-abi-major-mismatch = []
+test-abi-size-mismatch = []
