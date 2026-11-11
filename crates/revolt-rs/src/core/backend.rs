@@ -11,7 +11,9 @@
 //!   the parent; kqueues are not inherited).
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::AtomicU64;
+#[cfg(unix)]
+use std::sync::atomic::Ordering;
 
 pub const READ: u8 = 1;
 pub const WRITE: u8 = 2;
@@ -62,6 +64,7 @@ pub struct Reactor {
     dirty: Vec<i64>,
     #[cfg(unix)]
     poller: i32,
+    #[cfg(unix)]
     fork_gen: u64,
     /// the read end of the signal wake pipe, polled too
     wake: i64,
@@ -81,6 +84,7 @@ impl Reactor {
             dirty: Vec::new(),
             #[cfg(unix)]
             poller: -1,
+            #[cfg(unix)]
             fork_gen: FORK_GEN.load(Ordering::Relaxed),
             wake: -1,
             #[cfg(unix)]
@@ -153,7 +157,6 @@ impl Reactor {
         self.check_fork();
         self.apply();
         let mut timeout = timeout;
-        let mut woke = false;
         for (&fd, e) in self.fds.iter() {
             if e.always {
                 let w = e.want();
@@ -165,18 +168,19 @@ impl Reactor {
         }
         #[cfg(windows)]
         {
-            woke = self.poll_windows(timeout, out);
+            self.poll_windows(timeout, out)
         }
         #[cfg(unix)]
         {
+            let mut woke = false;
             if self.poller < 0 {
                 // nothing registered with a poller: sleep
                 sleep(timeout);
                 return false;
             }
             self.poll_os(timeout, out, &mut woke);
+            woke
         }
-        woke
     }
 
     #[cfg(unix)]

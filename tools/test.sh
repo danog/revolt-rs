@@ -30,7 +30,11 @@ fi
 INI=$(mktemp -d)
 case $(uname -s) in MINGW*|MSYS*|CYGWIN*) INI=$(cygpath -m "$INI") ;; esac
 EXTLINE="extension=$EXT"
-[ -n "$REVOLT_RS_PHPLIB" ] && EXTLINE=
+# baseline: the phpt tests' `require 'vendor/autoload.php'` finds tools/phplib's (the library)
+# through the include path (PHPUnit resets auto_prepend_file for them)
+if [ -n "$REVOLT_RS_PHPLIB" ]; then
+  case $(uname -s) in MINGW*|MSYS*|CYGWIN*) EXTLINE="include_path=\"$(cygpath -m "$ROOT/tools/phplib");.\"" ;; *) EXTLINE="include_path=\"$ROOT/tools/phplib:.\"" ;; esac
+fi
 printf '%s\nzend.assertions=1\nassert.exception=1\nmemory_limit=512M\n%s\n' "$EXTLINE" "$EXTRA_INI" > "$INI/php.ini"
 export PHPRC=$INI
 [ -n "$REVOLT_TEST_SCAN_DIR" ] || export PHP_INI_SCAN_DIR=

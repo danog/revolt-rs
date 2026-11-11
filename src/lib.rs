@@ -1,6 +1,5 @@
 //! revolt.so: the standalone revolt extension (revolt/event-loop in Rust). Everything is in the
 //! revolt-rs crate; this is the module entry only.
-#![cfg_attr(windows, feature(abi_vectorcall))]
 
 use revolt_rs::module;
 use revolt_rs::zend::sys;
