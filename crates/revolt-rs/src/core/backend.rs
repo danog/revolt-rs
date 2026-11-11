@@ -46,6 +46,9 @@ pub struct FdEntry {
     /// Windows: the fd is a SOCKET
     pub socket: bool,
     dirty: bool,
+    /// the PHP resource the fd belongs to (0: a raw handle): another resource on the same fd
+    /// number means the old one was closed (its registration went with it)
+    res: i64,
 }
 
 impl FdEntry {
@@ -90,9 +93,15 @@ impl Reactor {
         !self.fds.is_empty() || self.wake >= 0
     }
 
-    pub fn add(&mut self, fd: i64, socket: bool, id: u64, dir: u8) {
+    pub fn add(&mut self, fd: i64, socket: bool, res: i64, id: u64, dir: u8) {
         let e = self.fds.entry(fd).or_default();
         e.socket = socket;
+        if e.want() == 0 || e.res != res {
+            // the fd may have been closed and reused since it was registered: register anew
+            e.registered = 0;
+            e.always = false;
+            e.res = res;
+        }
         if dir == READ {
             e.readers.push(id);
         } else {
@@ -308,7 +317,8 @@ impl Reactor {
         let mut changes: [libc::kevent; 2] = unsafe { std::mem::zeroed() };
         let mut n = 0;
         for (bit, filter) in [(READ, libc::EVFILT_READ), (WRITE, libc::EVFILT_WRITE)] {
-            if (had ^ want) & bit != 0 {
+            // a fresh registration (had 0) also drops a filter left from a reused fd number
+            if (had ^ want) & bit != 0 || (had == 0 && want & bit == 0) {
                 let c = &mut changes[n];
                 c.ident = fd as usize;
                 c.filter = filter;

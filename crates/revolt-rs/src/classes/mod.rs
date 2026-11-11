@@ -102,6 +102,15 @@ const SUSP: Ty = c("Revolt\\EventLoop\\Suspension", false);
 const CBT: Ty = c("Revolt\\EventLoop\\CallbackType", false);
 const DCB: Ty = c("Revolt\\EventLoop\\Internal\\DriverCallback", false);
 const THR: Ty = c("Throwable", false);
+// `: self` of the static factories: Reflection shows "self" before PHP 8.5, the class after
+#[cfg(php85)]
+const SELF_ICE: Ty = c("Revolt\\EventLoop\\InvalidCallbackError", false);
+#[cfg(not(php85))]
+const SELF_ICE: Ty = c("self", false);
+#[cfg(php85)]
+const SELF_UT: Ty = c("Revolt\\EventLoop\\UncaughtThrowable", false);
+#[cfg(not(php85))]
+const SELF_UT: Ty = c("self", false);
 
 /// The methods of the Driver interface, with handlers (`None`: abstract).
 fn driver_methods(flags: u32, h: &dyn Fn(&'static str) -> k::Handler) -> Vec<k::Method> {
@@ -154,8 +163,8 @@ pub unsafe fn register_all() {
     ce.invalid_callback_error = k::register_class(
         "Revolt\\EventLoop\\InvalidCallbackError",
         vec![
-            m("nonNullReturn", zh!(errors::icr_non_null_return), PUB | STA, c("Revolt\\EventLoop\\InvalidCallbackError", false), vec![a("callbackId", S), a("closure", CL)]),
-            m("invalidIdentifier", zh!(errors::icr_invalid_identifier), PUB | STA, c("Revolt\\EventLoop\\InvalidCallbackError", false), vec![a("callbackId", S)]),
+            m("nonNullReturn", zh!(errors::icr_non_null_return), PUB | STA, SELF_ICE, vec![a("callbackId", S), a("closure", CL)]),
+            m("invalidIdentifier", zh!(errors::icr_invalid_identifier), PUB | STA, SELF_ICE, vec![a("callbackId", S)]),
             m("__construct", zh!(errors::icr_construct), PRI, NONE, vec![a("callbackId", S), a("code", I), a("message", S)]),
             m("getCallbackId", zh!(errors::icr_get_callback_id), PUB, S, vec![]),
             m("addInfo", zh!(errors::icr_add_info), PUB, V, vec![a("key", S), a("message", S)]),
@@ -172,8 +181,8 @@ pub unsafe fn register_all() {
     ce.uncaught_throwable = k::register_class(
         "Revolt\\EventLoop\\UncaughtThrowable",
         vec![
-            m("throwingCallback", zh!(errors::ut_throwing_callback), PUB | STA, c("Revolt\\EventLoop\\UncaughtThrowable", false), vec![a("closure", CL), a("previous", THR)]),
-            m("throwingErrorHandler", zh!(errors::ut_throwing_error_handler), PUB | STA, c("Revolt\\EventLoop\\UncaughtThrowable", false), vec![a("closure", CL), a("previous", THR)]),
+            m("throwingCallback", zh!(errors::ut_throwing_callback), PUB | STA, SELF_UT, vec![a("closure", CL), a("previous", THR)]),
+            m("throwingErrorHandler", zh!(errors::ut_throwing_error_handler), PUB | STA, SELF_UT, vec![a("closure", CL), a("previous", THR)]),
             m("__construct", zh!(errors::ut_construct), PRI, NONE, vec![a("message", S), a("closure", CL), a("previous", THR)]),
         ],
         sys::zend_ce_error,

@@ -44,13 +44,10 @@ pub unsafe fn extra_named(ex: Ex) -> *mut sys::HashTable {
     }
 }
 
-/// zend_parse_parameters_none(): false (an ArgumentCountError is thrown) when args were given.
+/// No parameters: extra arguments are ignored, as PHP functions (which revolt/event-loop's are)
+/// ignore them. Always true.
 #[inline(always)]
-pub unsafe fn none(ex: Ex) -> bool {
-    if num_args(ex) != 0 {
-        sys::zend_wrong_parameters_none_error();
-        return false;
-    }
+pub unsafe fn none(_ex: Ex) -> bool {
     true
 }
 
@@ -70,8 +67,16 @@ macro_rules! zpp {
     };
 }
 
+/// Runs zend_parse_parameters; arguments beyond the spec are ignored, as PHP functions (which
+/// revolt/event-loop's are) ignore them.
 #[doc(hidden)]
 pub unsafe fn parse(n: u32, spec: *const c_char, f: impl FnOnce(u32, *const c_char) -> sys::zend_result) -> bool {
+    let s = CStr::from_ptr(spec).to_bytes();
+    let n = if s.iter().any(|&c| c == b'*' || c == b'+') {
+        n
+    } else {
+        n.min(s.iter().filter(|c| c.is_ascii_alphabetic()).count() as u32)
+    };
     f(n, spec) == sys::ZEND_RESULT_CODE_SUCCESS
 }
 

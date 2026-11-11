@@ -354,7 +354,7 @@ fn activate_native(c: &mut Core, id: u64) -> Result<(), ActivateError> {
             };
             let dir = if r.kind == Kind::Readable { backend::READ } else { backend::WRITE };
             r.active = true;
-            c.reactor.add(h.fd, h.socket, id, dir);
+            c.reactor.add(h.fd, h.socket, h.res, id, dir);
         }
         Kind::Delay | Kind::Repeat => {
             r.active = true;
@@ -707,7 +707,7 @@ pub unsafe fn minit(scope: *mut sys::zend_class_entry) {
 fn new_fiber(d: D, func: *mut sys::zend_function) -> *mut sys::zend_object {
     unsafe {
         let mut cl = fiber::closure(func, d.0);
-        fiber::new(&mut cl)
+        fiber::new_tracked(&mut cl)
     }
 }
 
@@ -755,32 +755,35 @@ unsafe fn invoke_callback(d: D, id: u64) -> bool {
         return true;
     }
     let kind = r.kind;
-    // what the call needs, kept even if the callback is cancelled before it runs
-    let id_str = r.id_str;
-    zstr::addref(id_str);
-    let mut extra = match kind {
-        Kind::Readable | Kind::Writable => zval::copy(&r.stream.0),
-        Kind::Signal => zval::long(r.signal as i64),
-        _ => zval::undef(),
-    };
     let fired_once = matches!(kind, Kind::Defer | Kind::Delay);
-    let cb = match &r.cb {
-        Cb::Php { closure, callee } => Cb::Php { closure: closure.clone_ref(), callee: *callee },
+    let native = match &r.cb {
+        Cb::Php { .. } => None,
         Cb::Native { f, data, release } => {
             if fired_once {
                 // invoked after its cancel(): its data is released after the call
                 let cb = Cb::Native { f: *f, data: *data, release: *release };
                 std::mem::forget(std::mem::replace(&mut r.cb, Cb::Taken));
-                cb
+                Some(cb)
             } else {
-                Cb::Native { f: *f, data: *data, release: None }
+                Some(Cb::Native { f: *f, data: *data, release: None })
             }
         }
-        Cb::Taken => {
-            zstr::release(id_str);
-            zval::dtor(&mut extra);
-            return true;
+        Cb::Taken => return true,
+    };
+    let fiber = zend::active_fiber();
+    let callee = if let Cb::Php { closure, callee } = &r.cb {
+        // what the call needs, kept even if the callback is cancelled before it runs; held where
+        // the cycle collector sees it (the callback fiber's frames, in Revolt)
+        let mut held = vec![zval::copy(&*closure.0), zval::str_ref(r.id_str)];
+        match kind {
+            Kind::Readable | Kind::Writable => held.push(zval::copy(&*r.stream.0)),
+            Kind::Signal => held.push(zval::long(r.signal as i64)),
+            _ => {}
         }
+        fiber::inflight::hold(fiber, held);
+        Some(*callee)
+    } else {
+        None
     };
     let ok = match kind {
         Kind::Defer | Kind::Delay => v_cancel(d, id),
@@ -788,50 +791,56 @@ unsafe fn invoke_callback(d: D, id: u64) -> bool {
         Kind::Repeat => v_disable(d, id) && v_enable(d, id),
         _ => true,
     };
-    if !ok {
-        zstr::release(id_str);
-        zval::dtor(&mut extra);
-        return false;
-    }
-    match &cb {
-        Cb::Php { closure, callee } => {
-            let mut params = [zval::str_owned(id_str), extra];
-            let n = if zval::is_undef(&params[1]) { 1 } else { 2 };
-            let mut rv = call::call(callee, &mut params[..n], null_mut());
-            for p in params.iter_mut() {
-                zval::dtor(p);
-            }
-            if call::has_exception() {
-                if call::exception_is_unwind() {
-                    return false;
+    if let Some(callee) = callee {
+        if ok {
+            let (p, n) = fiber::inflight::params(fiber);
+            if !p.is_null() {
+                let params = std::slice::from_raw_parts_mut(p.add(1), n - 1);
+                let rv = call::call(&callee, params, null_mut());
+                let mut held = fiber::inflight::take(fiber);
+                let closure = Zv(held.remove(0));
+                for z in held.iter_mut() {
+                    zval::dtor(z);
                 }
-                let e = Zv(zval::obj_owned(call::take_exception()));
-                error(d, Desc::Closure(closure.clone_ref()), e);
-            } else if !zval::is_null(rv.as_ptr()) && !zval::is_undef(rv.as_ptr()) {
-                let e = classes::errors::non_null_return(id, closure.obj());
-                if !e.is_null() {
-                    error(d, Desc::Closure(closure.clone_ref()), Zv(zval::obj_owned(e)));
+                let mut rv = rv;
+                if call::has_exception() {
+                    if call::exception_is_unwind() {
+                        return false;
+                    }
+                    let e = Zv(zval::obj_owned(call::take_exception()));
+                    error(d, Desc::Closure(closure), e);
+                } else if !zval::is_null(rv.as_ptr()) && !zval::is_undef(rv.as_ptr()) {
+                    let e = classes::errors::non_null_return(id, closure.obj());
+                    if !e.is_null() {
+                        error(d, Desc::Closure(closure), Zv(zval::obj_owned(e)));
+                    }
                 }
             }
+        } else {
+            for mut z in fiber::inflight::take(fiber) {
+                zval::dtor(&mut z);
+            }
+            return false;
         }
-        Cb::Native { f, data, .. } => {
-            zstr::release(id_str);
-            zval::dtor(&mut extra);
+    } else if let Some(cb) = native {
+        if !ok {
+            return false;
+        }
+        if let Cb::Native { f, data, .. } = &cb {
             d.c().in_call = id;
             f(*data, id);
             d.c().in_call = 0;
             d.c().deferred_release.clear();
-            if call::has_exception() {
-                if call::exception_is_unwind() {
-                    return false;
-                }
-                let e = Zv(zval::obj_owned(call::take_exception()));
-                error(d, Desc::Static("native callback"), e);
-            }
         }
-        Cb::Taken => {}
+        drop(cb);
+        if call::has_exception() {
+            if call::exception_is_unwind() {
+                return false;
+            }
+            let e = Zv(zval::obj_owned(call::take_exception()));
+            error(d, Desc::Static("native callback"), e);
+        }
     }
-    drop(cb);
     classes::fiber_local::clear();
     !call::has_exception()
 }
@@ -841,34 +850,64 @@ fn invoke_microtasks(d: D) -> bool {
     loop {
         let Some(task) = d.c().microtasks.pop_front() else { return true };
         unsafe {
+            let fiber = zend::active_fiber();
             match task {
-                Microtask::Php { closure, mut args, named } => {
+                Microtask::Php { closure, args, named } => {
                     let Some(callee) = call::callee_of(closure.obj()) else { continue };
-                    let named_ht = if zval::ty(&named.0) == zval::ARRAY { named.0.value.arr } else { null_mut() };
-                    // the arguments go with the call (Revolt clears $args for the GC)
-                    let params: &mut [zval::Z] = std::slice::from_raw_parts_mut(args.as_mut_ptr() as *mut zval::Z, args.len());
-                    let rv = call::call(&callee, params, named_ht);
-                    drop(rv);
-                    drop(args);
-                    drop(named);
+                    // the closure, the named arguments, then the arguments: held where the
+                    // cycle collector sees them while the call runs
+                    let mut held = Vec::with_capacity(args.len() + 2);
+                    let (mut closure, mut named) = (closure, named);
+                    held.push(closure.take());
+                    held.push(named.take());
+                    for mut a in args {
+                        held.push(a.take());
+                    }
+                    fiber::inflight::hold(fiber, held);
+                    let (p, n) = fiber::inflight::params(fiber);
+                    let named_ht = if zval::ty(&*p.add(1)) == zval::ARRAY { (&*p.add(1)).value.arr } else { null_mut() };
+                    let params = std::slice::from_raw_parts_mut(p.add(2), n - 2);
+                    // the arguments go to the call (Revolt clears $args before the closure runs):
+                    // the call's frame holds the only references (the engine adds one per
+                    // argument, ours are given up first), so an argument the closure unsets is
+                    // destroyed at once
+                    let transfer = !takes_references(callee.func, params.len());
+                    if transfer {
+                        for a in params.iter_mut() {
+                            if zval::is_refcounted(&*a) {
+                                (*(**a).value.counted).gc.refcount -= 1;
+                            }
+                        }
+                    }
+                    drop(call::call(&callee, params, named_ht));
+                    let mut held = fiber::inflight::take(fiber);
+                    let closure = Zv(held.remove(0));
+                    for (i, z) in held.iter_mut().enumerate() {
+                        if transfer && i >= 1 {
+                            // given to the call, which released them
+                            continue;
+                        }
+                        zval::dtor(z);
+                    }
                     if call::has_exception() {
                         if call::exception_is_unwind() {
                             return false;
                         }
                         let e = Zv(zval::obj_owned(call::take_exception()));
                         error(d, Desc::Closure(closure), e);
-                    } else {
-                        drop(closure);
                     }
                 }
-                Microtask::Resume { fiber: f, mut value, throw } => {
+                Microtask::Resume { fiber: mut f, mut value, throw } => {
                     let fo = f.obj();
+                    fiber::inflight::hold(fiber, vec![f.take(), value.take()]);
                     if !fiber::is_terminated(fo) {
-                        let r = if throw { fiber::throw_into(fo, &mut value.0) } else { fiber::resume(fo, &mut value.0) };
-                        drop(r);
+                        let (p, _) = fiber::inflight::params(fiber);
+                        let v = &mut *p.add(1);
+                        drop(if throw { fiber::throw_into(fo, v) } else { fiber::resume(fo, v) });
                     }
-                    drop(value);
-                    drop(f);
+                    for mut z in fiber::inflight::take(fiber) {
+                        zval::dtor(&mut z);
+                    }
                     if call::has_exception() {
                         if call::exception_is_unwind() {
                             return false;
@@ -899,6 +938,23 @@ fn invoke_microtasks(d: D) -> bool {
     }
 }
 
+/// Whether a call of `f` with `n` arguments passes some by reference.
+unsafe fn takes_references(f: *mut sys::zend_function, n: usize) -> bool {
+    let info = (*f).common.arg_info;
+    if info.is_null() {
+        return false;
+    }
+    let declared = (*f).common.num_args as usize;
+    let variadic = (*f).common.fn_flags & sys::ZEND_ACC_VARIADIC != 0;
+    let by_ref = |i: usize| ((*info.add(i)).type_.type_mask >> 25) & 3 != 0;
+    for i in 0..n.min(declared) {
+        if by_ref(i) {
+            return true;
+        }
+    }
+    n > declared && variadic && by_ref(declared)
+}
+
 /// error(): the error handler (in a new fiber), or an interrupt that throws UncaughtThrowable in
 /// `{main}` (replacing any other: hiding the exception is worse).
 pub fn error(d: D, desc: Desc, ex: Zv) {
@@ -923,11 +979,17 @@ pub fn error(d: D, desc: Desc, ex: Zv) {
 /// The error fiber's function (createErrorCallback()).
 unsafe extern "C" fn error_fiber_body(ex: call::Ex, _rv: *mut sys::zval) {
     let d = D(call::this(ex));
-    let Some((handler, mut e, _desc)) = d.c().error_stash.take() else { return };
+    let Some((mut handler, mut e, _desc)) = d.c().error_stash.take() else { return };
     let Some(callee) = call::callee_of(handler.obj()) else { return };
-    let rv = call::call(&callee, std::slice::from_mut(&mut e.0), null_mut());
-    drop(rv);
-    drop(e);
+    let fiber = zend::active_fiber();
+    fiber::inflight::hold(fiber, vec![handler.take(), e.take()]);
+    let (p, _) = fiber::inflight::params(fiber);
+    drop(call::call(&callee, std::slice::from_raw_parts_mut(p.add(1), 1), null_mut()));
+    let mut held = fiber::inflight::take(fiber);
+    let handler = Zv(held.remove(0));
+    for z in held.iter_mut() {
+        zval::dtor(z);
+    }
     if call::has_exception() {
         if call::exception_is_unwind() {
             return;

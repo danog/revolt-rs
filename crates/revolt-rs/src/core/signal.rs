@@ -59,7 +59,7 @@ mod imp {
         }
         unsafe {
             let mut sa: libc::sigaction = std::mem::zeroed();
-            sa.sa_sigaction = handler as usize;
+            sa.sa_sigaction = handler as extern "C" fn(libc::c_int) as usize;
             sa.sa_flags = libc::SA_RESTART;
             libc::sigfillset(&mut sa.sa_mask);
             let mut old: libc::sigaction = std::mem::zeroed();

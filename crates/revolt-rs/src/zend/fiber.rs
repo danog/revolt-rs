@@ -159,3 +159,101 @@ pub unsafe fn suspend(value: &mut zval::Z) -> Zv {
         call::call(&call::Callee { func: suspend, obj: null_mut(), scope: sys::zend_ce_fiber }, std::slice::from_mut(value), null_mut())
     }
 }
+
+// ---------------------------------------------------------------- values held across a call
+
+/// Values the extension holds while a call made from a fiber runs (the callback, its arguments):
+/// PHP keeps such values in the frames of the fiber, where the cycle collector sees them; ours
+/// are reported by the fiber's get_gc, so a fiber suspended in a callback and only referenced
+/// from a cycle is collected as Revolt's would be. Fibers made by [`new_tracked`] only.
+pub mod inflight {
+    use super::super::{sys, zval};
+    use std::cell::RefCell;
+    use std::collections::HashMap;
+    use std::ffi::c_int;
+    use std::ptr::null_mut;
+
+    thread_local! {
+        static HELD: RefCell<HashMap<usize, Vec<zval::Z>>> = RefCell::new(HashMap::new());
+    }
+
+    static mut HANDLERS: *mut sys::zend_object_handlers = null_mut();
+    static mut ORIG_GC: sys::zend_object_get_gc_t = None;
+    static mut ORIG_FREE: sys::zend_object_free_obj_t = None;
+
+    /// Our handlers for fiber objects (the engine's, with get_gc and free_obj wrapped).
+    pub unsafe fn handlers(of: *mut sys::zend_object) -> *const sys::zend_object_handlers {
+        if HANDLERS.is_null() {
+            let mut h: sys::zend_object_handlers = std::ptr::read((*of).handlers);
+            ORIG_GC = h.get_gc;
+            ORIG_FREE = h.free_obj;
+            h.get_gc = Some(get_gc);
+            h.free_obj = Some(free_obj);
+            HANDLERS = Box::leak(Box::new(h));
+        }
+        HANDLERS
+    }
+
+    /// Holds `values` for the running fiber `f` (owned) until [`take`].
+    pub fn hold(f: *mut sys::zend_object, values: Vec<zval::Z>) {
+        HELD.with(|h| h.borrow_mut().insert(f as usize, values));
+    }
+
+    /// The values held for `f` (owned by the caller again).
+    pub fn take(f: *mut sys::zend_object) -> Vec<zval::Z> {
+        HELD.with(|h| h.borrow_mut().remove(&(f as usize))).unwrap_or_default()
+    }
+
+    /// A pointer to the held values of `f` (stable until [`take`]): the parameters of the call.
+    pub fn params(f: *mut sys::zend_object) -> (*mut zval::Z, usize) {
+        HELD.with(|h| match h.borrow_mut().get_mut(&(f as usize)) {
+            Some(v) => (v.as_mut_ptr(), v.len()),
+            None => (null_mut(), 0),
+        })
+    }
+
+    unsafe extern "C" fn get_gc(o: *mut sys::zend_object, table: *mut *mut sys::zval, n: *mut c_int) -> *mut sys::HashTable {
+        let ht = ORIG_GC.unwrap()(o, table, n);
+        let ptrs: Vec<*mut sys::zval> = HELD.with(|h| match h.borrow_mut().get_mut(&(o as usize)) {
+            Some(v) => v.iter_mut().map(|z| &mut **z as *mut sys::zval).collect(),
+            None => Vec::new(),
+        });
+        if ptrs.is_empty() {
+            return ht;
+        }
+        let buf = std::ptr::addr_of_mut!((*super::super::eg()).get_gc_buffer);
+        if *table != (*buf).start {
+            // not the engine's buffer: leave the report as it is
+            return ht;
+        }
+        (*buf).cur = (*buf).start.add(*n as usize);
+        for z in ptrs {
+            if zval::is_refcounted(z) {
+                if (*buf).cur == (*buf).end {
+                    sys::zend_get_gc_buffer_grow(buf);
+                }
+                std::ptr::copy_nonoverlapping(z, (*buf).cur, 1);
+                (*buf).cur = (*buf).cur.add(1);
+            }
+        }
+        *table = (*buf).start;
+        *n = (*buf).cur.offset_from((*buf).start) as c_int;
+        ht
+    }
+
+    unsafe extern "C" fn free_obj(o: *mut sys::zend_object) {
+        ORIG_FREE.unwrap()(o);
+        for mut z in take(o) {
+            zval::dtor(&mut z);
+        }
+    }
+}
+
+/// new Fiber($callable) whose in-flight values are reported to the cycle collector.
+pub unsafe fn new_tracked(callable: &mut Zv) -> *mut sys::zend_object {
+    let f = new(callable);
+    if !f.is_null() {
+        (*f).handlers = inflight::handlers(f);
+    }
+    f
+}

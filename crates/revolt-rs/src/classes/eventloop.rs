@@ -66,7 +66,7 @@ pub unsafe fn set_driver(d: *mut sys::zend_object) {
             if call::has_exception() {
                 return;
             }
-            sys::zend_is_true(r.as_ptr())
+            sys::zend_is_true(r.as_ptr()) as i32 != 0
         };
         if running {
             call::throw_error("Can't swap the event loop driver while the driver is running");

@@ -138,7 +138,7 @@ pub unsafe extern "C" fn create_object(ce: *mut sys::zend_class_entry) -> *mut s
 /// The callback id argument #`n` (a string, coerced as PHP does).
 #[inline(always)]
 pub unsafe fn id_arg(ex: Ex) -> Option<*mut sys::zend_string> {
-    if call::num_args(ex) == 1 {
+    if call::num_args(ex) >= 1 {
         let s = call::str_arg(ex, 0);
         if !s.is_null() {
             return Some(s);
@@ -155,7 +155,7 @@ pub unsafe fn id_arg(ex: Ex) -> Option<*mut sys::zend_string> {
 /// The only argument, a Closure.
 #[inline(always)]
 pub unsafe fn closure_only(ex: Ex) -> Option<*mut sys::zend_object> {
-    if call::num_args(ex) == 1 {
+    if call::num_args(ex) >= 1 {
         let o = call::closure_arg(ex, 0);
         if !o.is_null() {
             return Some(o);
@@ -172,7 +172,7 @@ pub unsafe fn closure_only(ex: Ex) -> Option<*mut sys::zend_object> {
 /// (float, Closure)
 #[inline(always)]
 pub unsafe fn float_closure(ex: Ex) -> Option<(f64, *mut sys::zend_object)> {
-    if call::num_args(ex) == 2 {
+    if call::num_args(ex) >= 2 {
         let f = call::arg(ex, 0);
         let o = call::closure_arg(ex, 1);
         if !o.is_null() {
@@ -195,7 +195,7 @@ pub unsafe fn float_closure(ex: Ex) -> Option<(f64, *mut sys::zend_object)> {
 /// (mixed, Closure)
 #[inline(always)]
 pub unsafe fn mixed_closure(ex: Ex) -> Option<(*mut sys::zval, *mut sys::zend_object)> {
-    if call::num_args(ex) == 2 {
+    if call::num_args(ex) >= 2 {
         let o = call::closure_arg(ex, 1);
         if !o.is_null() {
             return Some((call::arg(ex, 0), o));
@@ -307,7 +307,7 @@ pub unsafe extern "C" fn queue(ex: Ex, rv: *mut sys::zval) {
     queue_d(ex, rv, D(call::this(ex)))
 }
 
-pub unsafe fn queue_d(ex: Ex, rv: *mut sys::zval, d: D) {
+pub unsafe fn queue_d(ex: Ex, _rv: *mut sys::zval, d: D) {
     let n = call::num_args(ex);
     let o = if n >= 1 { call::closure_arg(ex, 0) } else { null_mut() };
     let o = if o.is_null() {
@@ -449,7 +449,7 @@ pub unsafe extern "C" fn cancel(ex: Ex, rv: *mut sys::zval) {
     cancel_d(ex, rv, D(call::this(ex)))
 }
 
-pub unsafe fn cancel_d(ex: Ex, rv: *mut sys::zval, d: D) {
+pub unsafe fn cancel_d(ex: Ex, _rv: *mut sys::zval, d: D) {
     let Some(s) = id_arg(ex) else { return };
     run::cancel(d, parse_id(s));
 }
@@ -573,7 +573,7 @@ pub unsafe extern "C" fn set_error_handler(ex: Ex, rv: *mut sys::zval) {
     set_error_handler_d(ex, rv, D(call::this(ex)))
 }
 
-pub unsafe fn set_error_handler_d(ex: Ex, rv: *mut sys::zval, d: D) {
+pub unsafe fn set_error_handler_d(ex: Ex, _rv: *mut sys::zval, d: D) {
     let mut z: *mut sys::zval = null_mut();
     if !zpp!(ex, "O!", &mut z, sys::zend_ce_closure) {
         return;
@@ -611,7 +611,7 @@ pub unsafe extern "C" fn stop(ex: Ex, rv: *mut sys::zval) {
     stop_d(ex, rv, D(call::this(ex)))
 }
 
-pub unsafe fn stop_d(ex: Ex, rv: *mut sys::zval, d: D) {
+pub unsafe fn stop_d(ex: Ex, _rv: *mut sys::zval, d: D) {
     if !call::none(ex) {
         return;
     }
@@ -639,7 +639,7 @@ pub unsafe extern "C" fn run(ex: Ex, rv: *mut sys::zval) {
     run_d(ex, rv, D(call::this(ex)))
 }
 
-pub unsafe fn run_d(ex: Ex, rv: *mut sys::zval, d: D) {
+pub unsafe fn run_d(ex: Ex, _rv: *mut sys::zval, d: D) {
     if !call::none(ex) {
         return;
     }

@@ -39,14 +39,14 @@ impl Drop for SuspState {
         if d.is_null() || unsafe { obj::freed(d) || !super::driver::is_native(d) } {
             return;
         }
-        let me = self as *mut SuspState as *mut std::ffi::c_void;
+        let me = self_obj(self);
         let c = D(d).c();
         if self.fiber.is_null() {
-            if c.main_suspension == self_obj(self) {
+            if c.main_suspension == me {
                 c.main_suspension = null_mut();
             }
         } else {
-            c.suspensions.remove(self.fiber, me);
+            c.suspensions.remove(self.fiber, me as *mut std::ffi::c_void);
         }
     }
 }
@@ -187,26 +187,23 @@ pub unsafe fn wake(o: *mut sys::zend_object, value: Zv, throw: bool) {
     // a fiber that died while suspended (destroyed by the GC) is not resumed
 }
 
-unsafe extern "C" fn suspend(ex: Ex, rv: *mut sys::zval) {
-    if !call::none(ex) {
-        return;
-    }
-    let o = call::this(ex);
+/// $suspension->suspend(): the value (UNDEF with an exception pending).
+pub unsafe fn suspend_value(o: *mut sys::zend_object) -> Zv {
     let s = st(o);
     if s.dead_main {
         call::throw_error("Suspension cannot be suspended after an uncaught exception is thrown from the event loop");
-        return;
+        return Zv::undef();
     }
     if s.pending {
         call::throw_error("Must call resume() or throw() before calling suspend() again");
-        return;
+        return Zv::undef();
     }
-    let Some(d) = driver_of(s) else { return };
+    let Some(d) = driver_of(s) else { return Zv::undef() };
     let cur = zend::active_fiber();
     let mine = if s.fiber.is_null() || fiber_alive(o, s, d) { s.fiber } else { null_mut() };
     if mine != cur || (!s.fiber.is_null() && mine.is_null()) {
         call::throw_error("Must not call suspend() from another fiber");
-        return;
+        return Zv::undef();
     }
     s.pending = true;
     s.error.set(zval::null());
@@ -215,7 +212,7 @@ unsafe extern "C" fn suspend(ex: Ex, rv: *mut sys::zval) {
         // awaiting from within a fiber
         s.suspended_fiber.set(zval::obj_ref(cur));
         let mut n = zval::null();
-        let mut v = fiber::suspend(&mut n);
+        let v = fiber::suspend(&mut n);
         // the state may have been freed meanwhile only with the object, which the frame holds
         let s = st(o);
         if call::has_exception() {
@@ -226,21 +223,20 @@ unsafe extern "C" fn suspend(ex: Ex, rv: *mut sys::zval) {
                 s.suspended_fiber.set(zval::null());
                 s.error.set(zval::obj_ref(e));
             }
-            return;
+            return Zv::undef();
         }
         s.suspended_fiber.set(zval::null());
-        zval::write(rv, v.take());
-        return;
+        return v;
     }
 
     // awaiting from {main}
     if run::loop_running(d) {
         s.pending = false;
         call::throw_error("The event loop is already running");
-        return;
+        return Zv::undef();
     }
     let result = match run::run_main(d) {
-        Step::Exception => return,
+        Step::Exception => return Zv::undef(),
         Step::Done => None,
         Step::Interrupt(i) => Some(i),
     };
@@ -255,22 +251,28 @@ unsafe extern "C" fn suspend(ex: Ex, rv: *mut sys::zval) {
         if let Some(i) = result {
             // unwrap an uncaught exception of the loop
             match run::take_interrupt(i) {
-                None => return,
+                None => return Zv::undef(),
                 Some(v) => drop(v),
             }
         }
         zend::gc_collect_cycles();
         let info = pending_traces(d);
         call::throw_error(&format!("Event loop terminated without resuming the current suspension (the cause is either a fiber deadlock, or an incorrectly unreferenced/canceled watcher):{info}"));
-        return;
+        return Zv::undef();
     }
     match result {
-        None => zval::write(rv, zval::null()),
-        Some(i) => {
-            if let Some(mut v) = run::take_interrupt(i) {
-                zval::write(rv, v.take());
-            }
-        }
+        None => Zv::null(),
+        Some(i) => run::take_interrupt(i).unwrap_or(Zv::undef()),
+    }
+}
+
+unsafe extern "C" fn suspend(ex: Ex, rv: *mut sys::zval) {
+    if !call::none(ex) {
+        return;
+    }
+    let mut v = suspend_value(call::this(ex));
+    if !zval::is_undef(v.as_ptr()) {
+        zval::write(rv, v.take());
     }
 }
 

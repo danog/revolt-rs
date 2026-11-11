@@ -9,6 +9,8 @@ pub struct Handle {
     pub fd: i64,
     /// Windows: the handle is a SOCKET (else a CRT file descriptor)
     pub socket: bool,
+    /// the handle of the PHP resource (0: none)
+    pub res: i64,
 }
 
 const AS_FD: i32 = 1;
@@ -37,11 +39,12 @@ pub unsafe fn handle(z: *mut sys::zval) -> Option<Handle> {
     if s.is_null() {
         return None;
     }
+    let res = (*(*zval::deref(z)).value.res).handle as i64;
     #[cfg(windows)]
     {
         let mut sock: usize = 0;
         if sys::_php_stream_cast(s, AS_SOCKETD | CAST_INTERNAL, &mut sock as *mut usize as *mut *mut _, 0) == sys::ZEND_RESULT_CODE_SUCCESS {
-            return Some(Handle { fd: sock as i64, socket: true });
+            return Some(Handle { fd: sock as i64, socket: true, res });
         }
     }
     let mut fd: i64 = -1;
@@ -56,7 +59,7 @@ pub unsafe fn handle(z: *mut sys::zval) -> Option<Handle> {
     if fd < 0 {
         return None;
     }
-    Some(Handle { fd, socket: false })
+    Some(Handle { fd, socket: false, res })
 }
 
 /// Whether PHP's read buffer of the stream holds unread data.
