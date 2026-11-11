@@ -55,6 +55,9 @@ revolt-rs = { git = "https://github.com/danog/revolt-rs", tag = "..." }  # the c
   the embedder's own additions.
 - `PHP` and `PHP_CONFIG` select the PHP to build for (8.2 to 8.6, NTS or ZTS, non-debug,
   64-bit); `revolt_rs::module::{ZEND_MODULE_API_NO, BUILD_ID}` are what the module entry needs.
+  PHP 8.6 needs the `[patch.crates-io]` entry for ext-php-rs-build of this repository's
+  Cargo.toml in the embedder's own workspace (see [patches/README.md](patches/README.md)): Cargo
+  applies only the root workspace's patches.
 - macOS: link with `-undefined dynamic_lookup`. Linux and other ELF systems: link with
   `-Wl,-Bsymbolic`, so that the copy's references to its own exported table never bind to
   another copy's (PHP loads extensions with `RTLD_GLOBAL`). Windows: nightly Rust and
