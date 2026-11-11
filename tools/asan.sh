@@ -38,6 +38,9 @@ case $1 in
     rc=0
     PHP="$PHP" EXT=$SO REVOLT_ASAN_RT=$RT REVOLT_ASAN_OPTIONS=detect_leaks=0:abort_on_error=0:halt_on_error=1:log_path=$OUT/asan \
       "$ROOT/tools/test.sh" "$@" || rc=$?
+    # macOS: phpt subprocesses start through /bin/sh, which drops DYLD_*: their "interceptors not
+    # working" aborts are not reports (they run under ASan on Linux)
+    grep -l "Interceptors are not working" "$OUT"/asan.* 2>/dev/null | xargs rm -f
     if ls "$OUT"/asan.* >/dev/null 2>&1; then echo "ASan reports in $OUT:"; grep -h "ERROR: AddressSanitizer" "$OUT"/asan.* | sort | uniq -c; rc=1; else echo "ASan: no reports"; fi
     exit $rc ;;
   php)
