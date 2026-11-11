@@ -9,6 +9,7 @@ set -e
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 PROFILE=${PROFILE:-fast}
 TD=${CARGO_TARGET_DIR:-$ROOT/target}
+case $TD in /*|[A-Za-z]:*) ;; *) TD=$PWD/$TD ;; esac
 case $(uname -s) in
   Darwin) pre=lib; ext=dylib ;;
   MINGW*|MSYS*|CYGWIN*) pre=; ext=dll ;;

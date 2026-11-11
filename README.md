@@ -107,7 +107,7 @@ tools/test.sh                                # tests/revolt (revolt/event-loop's
 REVOLT_RS_PHPLIB=1 tools/test.sh             # the same against the PHP library (the baseline)
 tools/embed-test.sh                          # the embedding tests (builds examples/embedder)
 php -n tools/dump-api.php phplib > ref.json && php -n -d extension=target/fast/librevolt.so tools/dump-api.php > ext.json && php tools/dump-api.php diff ref.json ext.json
-tools/asan.sh build && tools/asan.sh test    # AddressSanitizer (nightly Rust)
+tools/asan.sh build && tools/asan.sh test    # AddressSanitizer (nightly Rust); tools/asan.sh embed: the embedding suite
 ```
 
 `tests/revolt` is revolt/event-loop's suite, unchanged; [tests/NOT_APPLICABLE.md](tests/NOT_APPLICABLE.md)

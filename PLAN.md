@@ -176,14 +176,17 @@ AbstractDriver) are called through PHP method calls.
   version string). A copy finds the active table from the handler address of the registered
   `Revolt\EventLoop::getDriver` (dladdr + dlsym of `revolt_rs_abi` on Unix,
   GetModuleHandleEx + GetProcAddress on Windows); if it is its own handler, it calls itself.
-- `revolt_rs::embed::Loop::current()` gives the embedder the native fast path when the
-  active driver is a native revolt-rs driver of a compatible owner (not overridden by a PHP
-  subclass, not a TracingDriver or user Driver): fd watchers (raw fd/SOCKET, no PHP stream),
-  timers (delay/repeat, unreferenced or not), defer/queue, cancel/enable/disable/(un)reference,
-  getSuspension/suspend/resume/throw for `{main}` and fibers, the driver identity — Rust
-  callbacks `extern "C" fn(data, id)` with an optional release hook, ids are real Revolt
-  callbacks (visible to getIdentifiers()). Otherwise the embedder falls back to calling
-  `Revolt\EventLoop` through PHP (helpers provided), which also covers the PHP library.
+- `revolt_rs::embed::NativeLoop::current()` gives the embedder the native fast path when the
+  active driver is a native revolt-rs driver of a compatible owner (not a PHP subclass of
+  AbstractDriver, not a TracingDriver or user Driver): fd watchers (raw fd/SOCKET, no PHP
+  stream), timers (delay/repeat), defer/queue, cancel/enable/disable/(un)reference,
+  getSuspension/suspend/resume/throw for `{main}` and fibers — Rust callbacks
+  `extern "C" fn(data, id)` with an optional release hook and an optional `held` object (owned
+  by the record, reported to the cycle collector); ids are real Revolt callbacks (visible to
+  getIdentifiers()). `hold()`/`unhold()` keep objects alive for the running fiber where the
+  collector sees them (the fiber's get_gc), so a fiber waiting natively on a driver that became
+  garbage is collected. Otherwise the embedder falls back to calling `Revolt\EventLoop` through
+  PHP (`embed::php`), which also covers the PHP library. Details: EMBEDDING.md.
 - Composer: an embedder should declare `provide: {"ext-revolt": "*", "revolt/event-loop":
   "<the revolt/event-loop version its embedded revolt-rs implements>"}`.
 
