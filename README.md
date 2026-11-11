@@ -10,7 +10,7 @@ unchanged on a native loop.
   version in CI). revolt/event-loop's own test suite passes against the extension unchanged
   (one test does not apply: there is no FD_SETSIZE limit to hit). Every difference is listed,
   with the test that pins it, in [DIVERGENCES.md](DIVERGENCES.md).
-- **Faster:** 2–8× the PHP library's throughput for callbacks, timers and suspensions, 1.4–1.6×
+- **Faster:** 2–8× the PHP library's throughput for callbacks, timers and suspensions, 1.3–1.6×
   for socket I/O; see [Performance](#performance).
 - **Native reactor:** epoll (Linux), kqueue (macOS, BSD), WSAPoll (Windows), for every driver
   class: no `stream_select()` limits, and no need for ext-ev, ext-event or ext-uv. Signals work
@@ -64,19 +64,19 @@ version as the revolt-rs they embed (see [EMBEDDING.md](EMBEDDING.md#composer)).
 ## Performance
 
 Operations per second, the extension against the PHP library with each of its drivers, measured
-on 2026-11-11 at 98b2cab: Apple M3 Pro (macOS), PHP 8.5.12 NTS CLI with opcache (no JIT),
+on 2026-11-11 at 3218edf: Apple M3 Pro (macOS), PHP 8.5.12 NTS CLI with opcache (no JIT),
 release build (fat LTO), ext-ev 1.2.3, ext-uv 0.3.0, ext-event 3.1.5; 5 alternating rounds,
 medians. `tools/bench/run.sh` reproduces it (`tools/bench/bench.php` has the cases).
 
 | Case | revolt-rs | PHP: StreamSelectDriver | PHP: EvDriver | PHP: UvDriver | PHP: EventDriver |
 |---|---|---|---|---|---|
-| `defer()`: 1M callbacks | 1.89 M/s | 0.94 M/s (2.0×) | 0.91 M/s (2.1×) | 0.92 M/s (2.1×) | 0.90 M/s (2.1×) |
-| `queue()`: 1M microtasks | 6.79 M/s | 3.01 M/s (2.3×) | 2.83 M/s (2.4×) | 3.01 M/s (2.3×) | 3.00 M/s (2.3×) |
-| `delay()`: 200k timers, 0–10 ms | 0.90 M/s | 0.20 M/s (4.5×) | 0.66 M/s (1.4×) | 0.20 M/s (4.5×) | 0.59 M/s (1.5×) |
-| `repeat()`: 1000 timers × 200 | 4.37 M/s | 0.52 M/s (8.4×) | 1.59 M/s (2.7×) | 0.95 M/s (4.6×) | 1.29 M/s (3.4×) |
-| `onReadable()`: socket-pair ping-pong (round trips) | 0.40 M/s | 0.25 M/s (1.6×) | 0.28 M/s (1.4×) | 0.28 M/s (1.4×) | 0.29 M/s (1.4×) |
-| `{main}` suspend/resume round trips | 3.48 M/s | 1.08 M/s (3.2×) | 1.08 M/s (3.2×) | 1.08 M/s (3.2×) | 1.07 M/s (3.3×) |
-| fiber suspend/resume round trips | 2.62 M/s | 1.21 M/s (2.2×) | 1.21 M/s (2.2×) | 1.19 M/s (2.2×) | 1.20 M/s (2.2×) |
+| `defer()`: 1M callbacks | 3.05 M/s | 1.15 M/s (2.6×) | 1.13 M/s (2.7×) | 1.13 M/s (2.7×) | 1.12 M/s (2.7×) |
+| `queue()`: 1M microtasks | 7.20 M/s | 3.51 M/s (2.0×) | 3.51 M/s (2.1×) | 3.51 M/s (2.1×) | 3.54 M/s (2.0×) |
+| `delay()`: 200k timers, 0–10 ms | 1.57 M/s | 0.29 M/s (5.4×) | 0.79 M/s (2.0×) | 0.28 M/s (5.7×) | 0.70 M/s (2.2×) |
+| `repeat()`: 1000 timers × 200 | 4.80 M/s | 0.58 M/s (8.3×) | 1.78 M/s (2.7×) | 1.13 M/s (4.2×) | 1.51 M/s (3.2×) |
+| `onReadable()`: socket-pair ping-pong (round trips) | 0.43 M/s | 0.27 M/s (1.6×) | 0.30 M/s (1.4×) | 0.31 M/s (1.4×) | 0.32 M/s (1.3×) |
+| `{main}` suspend/resume round trips | 3.81 M/s | 1.17 M/s (3.2×) | 1.17 M/s (3.3×) | 1.19 M/s (3.2×) | 1.17 M/s (3.2×) |
+| fiber suspend/resume round trips | 2.89 M/s | 1.32 M/s (2.2×) | 1.31 M/s (2.2×) | 1.30 M/s (2.2×) | 1.32 M/s (2.2×) |
 
 In parentheses: how many times faster revolt-rs is. Every case calls PHP closures, whose cost
 the extension cannot remove; the loop's own overhead is what shrinks.
