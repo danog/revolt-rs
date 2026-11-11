@@ -70,15 +70,17 @@ final class SleepingDriver extends AbstractDriver
             }
         }
         $now = $this->now();
-        foreach ($this->timers as $id => $timer) {
-            if ($timer->expiration <= $now) {
-                if ($timer->repeat) {
-                    $timer->expiration = $now + $timer->interval;
-                } else {
-                    unset($this->timers[$id]);
-                }
-                $this->enqueueCallback($timer);
+        $expired = array_filter($this->timers, static fn ($t) => $t->expiration <= $now);
+        // in expiration order (as Revolt's TimerQueue): several timers expire in one dispatch
+        // when usleep() overshoots (timer coalescing)
+        uasort($expired, static fn ($a, $b) => $a->expiration <=> $b->expiration);
+        foreach ($expired as $id => $timer) {
+            if ($timer->repeat) {
+                $timer->expiration = $now + $timer->interval;
+            } else {
+                unset($this->timers[$id]);
             }
+            $this->enqueueCallback($timer);
         }
     }
 
