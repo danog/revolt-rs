@@ -39,7 +39,8 @@ pub unsafe fn freed(o: *mut sys::zend_object) -> bool {
 /// Reflection, as the PHP classes are).
 pub unsafe fn handlers<T: State>() -> *mut sys::zend_object_handlers {
     let mut h: sys::zend_object_handlers = std::ptr::read(std::ptr::addr_of!(sys::std_object_handlers));
-    h.offset = std::mem::offset_of!(Native<T>, std) as c_int;
+    // c_int before 8.6, size_t since (php-src 777a79cac9d)
+    h.offset = std::mem::offset_of!(Native<T>, std) as _;
     h.free_obj = Some(free::<T>);
     h.get_gc = Some(get_gc::<T>);
     h.clone_obj = Some(no_clone::<T>);

@@ -20,6 +20,16 @@ extern "C" {
     pub fn zend_get_closure_method_def(obj: *mut zend_object) -> *const zend_function;
 }
 
+// PHP 8.6 dropped the leading underscore of the stream functions (php-src 8aca9f2ad65):
+// `_php_stream_cast` is now `php_stream_cast` (same signature).
+#[cfg(php86)]
+#[cfg_attr(all(windows, not(php_zts)), link(name = "php8"))]
+#[cfg_attr(all(windows, php_zts), link(name = "php8ts"))]
+extern "C" {
+    #[link_name = "php_stream_cast"]
+    pub fn _php_stream_cast(stream: *mut php_stream, castas: ::std::os::raw::c_int, ret: *mut *mut ::std::os::raw::c_void, show_err: ::std::os::raw::c_int) -> zend_result;
+}
+
 #[cfg(not(php86))]
 extern "C" {
     pub fn zend_create_fake_closure(res: *mut zval, func: *mut zend_function, scope: *mut zend_class_entry, called_scope: *mut zend_class_entry, this_ptr: *mut zval);
