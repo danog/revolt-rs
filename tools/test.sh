@@ -3,7 +3,8 @@
 #   tools/test.sh [phpunit args...]          e.g. tools/test.sh --testsuite revolt
 # Env: PHP (default php), EXT (default target/fast/librevolt.{so,dylib}), EXTRA_INI (more ini lines,
 # e.g. "extension=ev" to run EvDriverTest), REVOLT_RS_PHPLIB=1 (the baseline: the PHP library
-# from tools/phplib instead of the extension), REVOLT_TEST_SCAN_DIR=1 (keep PHP's ini scan dir).
+# from tools/phplib instead of the extension), REVOLT_TEST_SCAN_DIR=1 (keep the extensions of PHP's
+# own configuration: its ini scan dir and the extension lines of its php.ini).
 set -e
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 PHP=${PHP:-php}
@@ -25,8 +26,8 @@ if [ -n "$REVOLT_ASAN_RT" ]; then
   if [ "$(uname)" = Darwin ]; then export DYLD_INSERT_LIBRARIES=$REVOLT_ASAN_RT; else export LD_PRELOAD=$REVOLT_ASAN_RT; fi
   export USE_ZEND_ALLOC=0 ZEND_DONT_UNLOAD_MODULES=1 ASAN_OPTIONS=$REVOLT_ASAN_OPTIONS
 fi
-# an ini of our own (PHPRC: the phpt subprocesses get it too); the scan dir is dropped unless
-# REVOLT_TEST_SCAN_DIR=1 (CI: the extensions setup-php installs, PHPUnit's dom/mbstring/xml...)
+# an ini of our own (PHPRC: the phpt subprocesses get it too); PHP's own extensions are dropped
+# unless REVOLT_TEST_SCAN_DIR=1 (CI: the extensions setup-php installs, PHPUnit's dom/mbstring...)
 INI=$(mktemp -d)
 case $(uname -s) in MINGW*|MSYS*|CYGWIN*) INI=$(cygpath -m "$INI") ;; esac
 EXTLINE="extension=$EXT"
@@ -36,6 +37,11 @@ if [ -n "$REVOLT_RS_PHPLIB" ]; then
   case $(uname -s) in MINGW*|MSYS*|CYGWIN*) EXTLINE="include_path=\"$(cygpath -m "$ROOT/tools/phplib");.\"" ;; *) EXTLINE="include_path=\"$ROOT/tools/phplib:.\"" ;; esac
 fi
 printf '%s\nzend.assertions=1\nassert.exception=1\nmemory_limit=512M\n%s\n' "$EXTLINE" "$EXTRA_INI" > "$INI/php.ini"
+if [ -n "$REVOLT_TEST_SCAN_DIR" ]; then
+  # the extensions of PHP's own php.ini too (ours replaces it; Windows has no scan dir)
+  "$PHP" -r '$f = php_ini_loaded_file(); foreach ($f ? file($f) : [] as $l) { if (preg_match("/^\s*(zend_)?extension(_dir)?\s*=/", $l)) echo $l; }' >> "$INI/php.ini"
+else
+  export PHP_INI_SCAN_DIR=
+fi
 export PHPRC=$INI
-[ -n "$REVOLT_TEST_SCAN_DIR" ] || export PHP_INI_SCAN_DIR=
 exec "$PHP" -c "$INI/php.ini" vendor/bin/phpunit "$@"
