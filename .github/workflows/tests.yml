@@ -45,9 +45,10 @@ jobs:
         with:
           php-version: ${{ matrix.php }}
           tools: composer
-          # ev and event: their driver classes' tests (ext-uv has no maintained PECL release for
-          # every version); pcntl and posix: the signal and fork tests (Unix)
-          extensions: ${{ startsWith(matrix.os, 'windows') && 'sockets' || 'ev, sockets, event, pcntl, posix' }}
+          # ev and event: their driver classes' tests, where they build (ext-uv has no maintained
+          # PECL release for every version; ev 1.2.3 and event do not build on 8.6 yet: those tests
+          # skip); pcntl and posix: the signal and fork tests (Unix); mbstring: PHPUnit (Windows)
+          extensions: ${{ startsWith(matrix.os, 'windows') && 'sockets, mbstring' || matrix.php == '8.6' && 'sockets, pcntl, posix' || 'ev, sockets, event, pcntl, posix' }}
           ini-values: zend.assertions=1
           coverage: none
 
@@ -61,17 +62,33 @@ jobs:
         with:
           key: php-${{ matrix.php }}-${{ matrix.ts }}
 
+      # PHP 8.2/8.3 for Windows are VS16 builds: they refuse a module linked by a newer linker
+      # ("linked with 14.44, but the core is linked with 14.29"), so link with VS16's (v142)
+      - uses: ilammy/msvc-dev-cmd@v1
+        if: ${{ startsWith(matrix.os, 'windows') && (matrix.php == '8.2' || matrix.php == '8.3') }}
+        with:
+          arch: x64
+          toolset: "14.29"
+
       - name: libclang (for the Zend Engine bindings) and the build's PHP
         run: |
           case "$RUNNER_OS" in
             # the runner image has clang (and libclang); install it only if it is missing
             Linux)   ls /usr/lib/llvm-*/lib/libclang.so* >/dev/null 2>&1 || { sudo apt-get update -qq && sudo apt-get install -y -qq libclang-dev; } ;;
-            macOS)   echo "LIBCLANG_PATH=$(xcode-select -p)/Toolchains/XcodeDefault.xctoolchain/usr/lib" >> "$GITHUB_ENV" ;;
+            # the tests' processes get an application's timer policy (latency tier 0): the
+            # runner's own policy lets macOS coalesce sleep()/select() timeouts by tens of ms,
+            # beyond revolt/event-loop's timing tests' bounds (the PHP library fails them too)
+            macOS)   echo "LIBCLANG_PATH=$(xcode-select -p)/Toolchains/XcodeDefault.xctoolchain/usr/lib" >> "$GITHUB_ENV"
+                     echo "RUN=taskpolicy -a" >> "$GITHUB_ENV" ;;
             Windows) echo "LIBCLANG_PATH=C:\\Program Files\\LLVM\\bin" >> "$GITHUB_ENV" ;;
           esac
           if [ "$RUNNER_OS" = Windows ]; then
             # php.exe as a Windows path (build.rs and ext-php-rs run it; there is no php-config)
             echo "PHP=$(cygpath -w "$(command -v php.exe)")" >> "$GITHUB_ENV"
+            # the VS16 linker set up above, by path: Git Bash's /usr/bin/link.exe comes first in PATH
+            if [ -n "$VCToolsInstallDir" ]; then
+              echo "CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER=${VCToolsInstallDir}bin\\Hostx64\\x64\\link.exe" >> "$GITHUB_ENV"
+            fi
           else
             echo "PHP=$(command -v php)" >> "$GITHUB_ENV"
             echo "PHP_CONFIG=$(command -v php-config)" >> "$GITHUB_ENV"
@@ -89,6 +106,13 @@ jobs:
           echo "EXT=$ext" >> "$GITHUB_ENV"
           php -n -d "extension=$ext" -r 'echo "revolt ", phpversion("revolt"), PHP_ZTS ? " (ZTS)" : "", "\n";'
           test "$(php -n -r 'echo (int) PHP_ZTS;')" = ${{ matrix.ts == 'zts' && 1 || 0 }}
+
+      - name: Timer precision of the runner (informational)
+        if: ${{ runner.os == 'macOS' }}
+        run: |
+          t='foreach ([0.01, 0.1, 0.5] as $d) { $t = hrtime(true); usleep((int) ($d * 1e6)); printf("usleep(%.2f) +%.1f ms; ", $d, ((hrtime(true) - $t) / 1e9 - $d) * 1e3); } echo "\n";'
+          echo "runner's policy: $(php -n -r "$t")"
+          echo "taskpolicy -a:   $($RUN php -n -r "$t")"
 
       - name: Install the test harness and the PHP library
         id: harness
@@ -109,7 +133,7 @@ jobs:
         env:
           PHP: php
           REVOLT_TEST_SCAN_DIR: "1"
-        run: tools/test.sh --log-junit extension.xml
+        run: $RUN tools/test.sh --log-junit extension.xml
 
       - name: Suites against the PHP library (baseline)
         if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.harness.outcome == 'success' }}
@@ -118,7 +142,7 @@ jobs:
           REVOLT_TEST_SCAN_DIR: "1"
           REVOLT_RS_PHPLIB: "1"
         # the NOT_APPLICABLE tests are excluded here too; tests/native's divergence tests skip
-        run: tools/test.sh --log-junit baseline.xml
+        run: $RUN tools/test.sh --log-junit baseline.xml
 
       - name: Embedding (examples/embedder, tests/embedder)
         if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.harness.outcome == 'success' }}
@@ -126,7 +150,7 @@ jobs:
           TEST_PHP: php
           REVOLT_TEST_SCAN_DIR: "1"
           CARGO_FLAGS: --locked
-        run: tools/embed-test.sh --log-junit embedder.xml
+        run: $RUN tools/embed-test.sh --log-junit embedder.xml
 
       - uses: actions/upload-artifact@v4
         if: always()
@@ -143,6 +167,9 @@ jobs:
     name: "ASan (ubuntu-24.04 / PHP ${{ matrix.php }})"
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    env:
+      # tools/asan.sh: the toolchain installed below
+      TOOLCHAIN: nightly-2026-09-02
     strategy:
       fail-fast: false
       matrix:

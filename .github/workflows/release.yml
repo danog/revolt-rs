@@ -138,10 +138,21 @@ jobs:
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
           toolchain: nightly-2026-09-02
+      # PHP 8.2/8.3 for Windows are VS16 builds: they refuse a module linked by a newer linker
+      # ("linked with 14.44, but the core is linked with 14.29"), so link with VS16's (v142)
+      - uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1
+        if: ${{ matrix.php == '8.2' || matrix.php == '8.3' }}
+        with:
+          arch: x64
+          toolset: "14.29"
       - name: Build and package
         run: |
           export LIBCLANG_PATH='C:\Program Files\LLVM\bin'
           export PHP=$(cygpath -w "$(command -v php.exe)")
+          # the VS16 linker set up above, by path: Git Bash's /usr/bin/link.exe comes first in PATH
+          if [ -n "$VCToolsInstallDir" ]; then
+            export CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER="${VCToolsInstallDir}bin\\Hostx64\\x64\\link.exe"
+          fi
           cargo build --release --locked -p revolt-ext
           # "PHP Extension Build => API20240924,NTS,VS17" (TS builds: ",TS,") -> vs17
           compiler=$(php -i | sed -n 's/^PHP Extension Build => .*,\(VS[0-9]*\)$/\1/p' | tr 'A-Z' 'a-z')
