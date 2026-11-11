@@ -75,16 +75,15 @@ jobs:
           case "$RUNNER_OS" in
             # the runner image has clang (and libclang); install it only if it is missing
             Linux)   ls /usr/lib/llvm-*/lib/libclang.so* >/dev/null 2>&1 || { sudo apt-get update -qq && sudo apt-get install -y -qq libclang-dev; } ;;
-            # the tests' processes get an application's timer policy (latency tier 0): the
-            # runner's own policy lets macOS coalesce sleep()/select() timeouts by tens of ms,
-            # beyond revolt/event-loop's timing tests' bounds (the PHP library fails them too)
+            # REVOLT_TEST_CI_EXCLUDE: the tests the runner's timers break (tests/ci-excluded/)
             macOS)   echo "LIBCLANG_PATH=$(xcode-select -p)/Toolchains/XcodeDefault.xctoolchain/usr/lib" >> "$GITHUB_ENV"
-                     echo "RUN=taskpolicy -a" >> "$GITHUB_ENV" ;;
+                     echo "REVOLT_TEST_CI_EXCLUDE=macos" >> "$GITHUB_ENV" ;;
             # bindgen takes its system include dirs from a clang executable: the one matching
             # libclang (the VS environment above puts VS's own older clang first in PATH, whose
             # intrinsics headers libclang rejects)
             Windows) echo "LIBCLANG_PATH=C:\\Program Files\\LLVM\\bin" >> "$GITHUB_ENV"
-                     echo "CLANG_PATH=C:\\Program Files\\LLVM\\bin\\clang.exe" >> "$GITHUB_ENV" ;;
+                     echo "CLANG_PATH=C:\\Program Files\\LLVM\\bin\\clang.exe" >> "$GITHUB_ENV"
+                     echo "REVOLT_TEST_CI_EXCLUDE=windows" >> "$GITHUB_ENV" ;;
           esac
           if [ "$RUNNER_OS" = Windows ]; then
             # php.exe as a Windows path (build.rs and ext-php-rs run it; there is no php-config)
@@ -111,12 +110,11 @@ jobs:
           php -n -d "extension=$ext" -r 'echo "revolt ", phpversion("revolt"), PHP_ZTS ? " (ZTS)" : "", "\n";'
           test "$(php -n -r 'echo (int) PHP_ZTS;')" = ${{ matrix.ts == 'zts' && 1 || 0 }}
 
+      # the deviations behind tests/ci-excluded/: usleep() as hrtime() and microtime() see it
       - name: Timer precision of the runner (informational)
-        if: ${{ runner.os == 'macOS' }}
+        if: ${{ runner.os != 'Linux' }}
         run: |
-          t='foreach ([0.01, 0.1, 0.5] as $d) { $t = hrtime(true); usleep((int) ($d * 1e6)); printf("usleep(%.2f) +%.1f ms; ", $d, ((hrtime(true) - $t) / 1e9 - $d) * 1e3); } echo "\n";'
-          echo "runner's policy: $(php -n -r "$t")"
-          echo "taskpolicy -a:   $($RUN php -n -r "$t")"
+          php -n -r 'foreach ([0.01, 0.1, 0.5, 0.5, 0.5] as $d) { $h = hrtime(true); $m = microtime(true); usleep((int) ($d * 1e6)); printf("usleep(%.2f): hrtime %+.1f ms, microtime %+.1f ms\n", $d, ((hrtime(true) - $h) / 1e9 - $d) * 1e3, (microtime(true) - $m - $d) * 1e3); }'
 
       - name: Install the test harness and the PHP library
         id: harness
@@ -137,7 +135,7 @@ jobs:
         env:
           PHP: php
           REVOLT_TEST_SCAN_DIR: "1"
-        run: $RUN tools/test.sh --log-junit extension.xml
+        run: tools/test.sh --log-junit extension.xml
 
       - name: Suites against the PHP library (baseline)
         if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.harness.outcome == 'success' }}
@@ -145,8 +143,8 @@ jobs:
           PHP: php
           REVOLT_TEST_SCAN_DIR: "1"
           REVOLT_RS_PHPLIB: "1"
-        # the NOT_APPLICABLE tests are excluded here too; tests/native's divergence tests skip
-        run: $RUN tools/test.sh --log-junit baseline.xml
+        # the NOT_APPLICABLE (and CI-excluded) tests are excluded here too; divergence tests skip
+        run: tools/test.sh --log-junit baseline.xml
 
       - name: Embedding (examples/embedder, tests/embedder)
         if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.harness.outcome == 'success' }}
@@ -154,7 +152,7 @@ jobs:
           TEST_PHP: php
           REVOLT_TEST_SCAN_DIR: "1"
           CARGO_FLAGS: --locked
-        run: $RUN tools/embed-test.sh --log-junit embedder.xml
+        run: tools/embed-test.sh --log-junit embedder.xml
 
       - uses: actions/upload-artifact@v4
         if: always()
