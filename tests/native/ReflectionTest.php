@@ -31,7 +31,7 @@ final class ReflectionTest extends TestCase
     {
         self::nativeOnly();
         $driver = new StreamSelectDriver();
-        [$read] = \stream_socket_pair(\STREAM_PF_UNIX, \STREAM_SOCK_STREAM, \STREAM_IPPROTO_IP);
+        [$read] = \stream_socket_pair(\DIRECTORY_SEPARATOR === '\\' ? \STREAM_PF_INET : \STREAM_PF_UNIX, \STREAM_SOCK_STREAM, \STREAM_IPPROTO_IP);
         $id = $driver->onReadable($read, static function (): void {});
         $property = new \ReflectionProperty(StreamSelectDriver::class, 'readStreams');
         self::assertSame([], $property->getValue($driver));
