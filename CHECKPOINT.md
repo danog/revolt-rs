@@ -68,6 +68,33 @@ The first run (f5552ad) failed everywhere; fixed since:
   ~0.1 ms locally, was ~10 ms on a 200 ms timer).
 - Every suite step now runs even when an earlier one failed.
 
+Run 43042104542 (dae20ed): 19 failures. Fixes pushed since:
+- f258565: build on PHP 8.6.0 (php_stream_cast lost its underscore; handlers' offset size_t).
+- 33f09ce: embedder SleepingDriver enqueues timers expired together in expiration order.
+- 4c90dad: asan.sh preloads the system's shared ASan runtime on Linux; TOOLCHAIN pins nightly.
+- fa12f32: test.sh keeps php.ini's extensions on Windows (no scan dir there).
+- b134077: CI: VS16 linker 14.29 for Windows PHP 8.2/8.3, mbstring, macOS `taskpolicy -a`,
+  no ev/event on 8.6.
+- 0ba25a0: ReflectionTest uses an INET socket pair on Windows.
+- 7d08489: tools/asan-nodeepbind: dlopen shim dropping RTLD_DEEPBIND (ASan on PHP < 8.5).
+- 5ddfa32: Windows bindgen uses CLANG_PATH=C:\Program Files\LLVM\bin\clang.exe; ASan job
+  installs tools/phplib.
+
+Run 43052710122 (b134077): all PIE builds, ubuntu 8.2/8.2 ZTS/8.3 ZTS/8.6/8.6 ZTS, macOS 8.6
+ZTS passed. macOS timer step: `taskpolicy -a` gives no improvement (sleeps overshoot
++14..+73 ms either way) → to be removed.
+
+Run 43054345552 (5ddfa32), partial: Windows 8.2, 8.2 ZTS, 8.3 (14.29-linked DLL accepted), 8.5,
+ASan 8.5, PIE 8.4/8.4 ZTS passed. Windows 8.3 ZTS and 8.4 ZTS failed only
+`StreamSelectDriverTest::testCorrectTimeoutIfBlockingBeforeDelay` (1.4981 s resp. 1.4994 s,
+bound ≥ 1.5; the 8.4 ZTS one in the PHP-library baseline): Windows' usleep() (a waitable timer)
+returns a few ms early → flaky upstream test on Windows runners.
+
+Maintainer decision (macOS; applied to Windows the same way): upstream timing tests failing on
+CI runners because of the OS's timer behaviour (the PHP library fails them too) are excluded on
+that CI only, through an env-gated list in tools/test.sh with the measured deviation as the
+reason, NOT in tests/NOT_APPLICABLE.md (which excludes everywhere).
+
 ## How to build and test
 
 See README "Tests" and the previous commands:
@@ -84,9 +111,9 @@ patterns. Do not rebuild a target dir while a test run uses it.
 
 ## Next steps
 
-1. Check the CI run of the latest push once; fix what remains (Windows has never run the
-   suites; the Linux ASan job has never run: PHP's CLI loads extensions without RTLD_DEEPBIND
-   since 8.2 (zend_dl_use_deepbind), which ASan would refuse).
+1. CI green (in progress, see "CI" above): open items are the per-CI timing exclusions, the
+   remaining jobs of the current run (ASan 8.2 with the deepbind shim; fallback: ASan on 8.5/8.6
+   only, documented), ubuntu and macOS jobs.
 2. Integrate the embedding into danog/mongo-php-async-driver (separate step), then its workload
    benchmark.
 3. Performance passes (e.g. epoll_pwait2, avoiding the id-string allocation per callback,
