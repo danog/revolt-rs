@@ -148,6 +148,8 @@ jobs:
       - name: Build and package
         run: |
           export LIBCLANG_PATH='C:\Program Files\LLVM\bin'
+          # bindgen's include dirs from the clang of that libclang (not VS's older one in PATH)
+          export CLANG_PATH='C:\Program Files\LLVM\bin\clang.exe'
           export PHP=$(cygpath -w "$(command -v php.exe)")
           # the VS16 linker set up above, by path: Git Bash's /usr/bin/link.exe comes first in PATH
           if [ -n "$VCToolsInstallDir" ]; then

@@ -80,7 +80,11 @@ jobs:
             # beyond revolt/event-loop's timing tests' bounds (the PHP library fails them too)
             macOS)   echo "LIBCLANG_PATH=$(xcode-select -p)/Toolchains/XcodeDefault.xctoolchain/usr/lib" >> "$GITHUB_ENV"
                      echo "RUN=taskpolicy -a" >> "$GITHUB_ENV" ;;
-            Windows) echo "LIBCLANG_PATH=C:\\Program Files\\LLVM\\bin" >> "$GITHUB_ENV" ;;
+            # bindgen takes its system include dirs from a clang executable: the one matching
+            # libclang (the VS environment above puts VS's own older clang first in PATH, whose
+            # intrinsics headers libclang rejects)
+            Windows) echo "LIBCLANG_PATH=C:\\Program Files\\LLVM\\bin" >> "$GITHUB_ENV"
+                     echo "CLANG_PATH=C:\\Program Files\\LLVM\\bin\\clang.exe" >> "$GITHUB_ENV" ;;
           esac
           if [ "$RUNNER_OS" = Windows ]; then
             # php.exe as a Windows path (build.rs and ext-php-rs run it; there is no php-config)
@@ -198,6 +202,8 @@ jobs:
           REVOLT_TEST_SCAN_DIR: "1"
         run: |
           (cd tests && composer install --no-interaction --no-progress -q)
+          # the PHP library: the embedding suite's fallback scenario
+          (cd tools/phplib && composer install --no-interaction --no-progress -q)
           tools/asan.sh test
       - name: Embedding suite under ASan
         env:
