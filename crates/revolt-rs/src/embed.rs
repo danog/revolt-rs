@@ -416,7 +416,3 @@ pub mod php {
         call::static_method(ce, lcname, args)
     }
 }
-
-// the suspension of a pending wait is kept alive by its callback data in embedders: nothing here
-#[allow(dead_code)]
-fn _assert_types(_: Option<Microtask>) {}
