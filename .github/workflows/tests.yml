@@ -6,7 +6,9 @@ name: Tests
 # both), and the embedding tests (examples/embedder: tests/embedder). ASan on Linux.
 
 on:
+  # documentation-only pushes do not run (nor cancel a running test run)
   push:
+    paths-ignore: ["*.md", "patches/README.md"]
   pull_request:
   workflow_dispatch:
 
