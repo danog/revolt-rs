@@ -4,7 +4,8 @@
 #   tools/asan.sh test [phpunit...]  the PHPUnit suites with that build, under ASan
 #   tools/asan.sh embed [phpunit...] the embedding suite (examples/embedder) under ASan
 #   tools/asan.sh php [args...]      one php process with that build, under ASan
-# Env: PHP / PHP_CONFIG (the PHP to build for and run; default php / php-config), OUT (reports).
+# Env: PHP / PHP_CONFIG (the PHP to build for and run; default php / php-config), OUT (reports),
+# TOOLCHAIN (the nightly Rust toolchain; default nightly).
 #
 # How: the extension is instrumented, PHP is not; ASan's runtime must be in the process from the
 # start, so it is preloaded (DYLD_INSERT_LIBRARIES on macOS, LD_PRELOAD on Linux), and
@@ -14,15 +15,24 @@ set -e
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 PHP=$(command -v "${PHP:-php}")
 PHP_CONFIG=$(command -v "${PHP_CONFIG:-php-config}")
-HOST=$(rustc +nightly -vV | sed -n 's/^host: //p')
+TOOLCHAIN=${TOOLCHAIN:-nightly}
+HOST=$(rustc +"$TOOLCHAIN" -vV | sed -n 's/^host: //p')
 TD=$ROOT/target/asan
 SO_DIR=$TD/$HOST/fast
 case $(uname) in
   Darwin) SO=$SO_DIR/librevolt.dylib; PRE=DYLD_INSERT_LIBRARIES
-          RT=$(rustc +nightly --print sysroot)/lib/rustlib/$HOST/lib/librustc-nightly_rt.asan.dylib ;;
+          RT=$(rustc +"$TOOLCHAIN" --print sysroot)/lib/rustlib/$HOST/lib/librustc-nightly_rt.asan.dylib ;;
   *) SO=$SO_DIR/librevolt.so; PRE=LD_PRELOAD
-     RT=$(rustc +nightly --print sysroot)/lib/rustlib/$HOST/lib/librustc-nightly_rt.asan.so ;;
+     # Rust ships the Linux runtime only as a static library (for executables): preload the
+     # system's shared one, clang's or else gcc's (the same compiler-rt runtime and ABI)
+     RT=
+     for rt in "$(clang -print-file-name="libclang_rt.asan-$(uname -m).so" 2>/dev/null)" "$(gcc -print-file-name=libasan.so 2>/dev/null)"; do
+       case $rt in /*) [ -f "$rt" ] && { RT=$(readlink -f "$rt"); break; } ;; esac
+     done ;;
 esac
+if [ "$1" != build ] && [ ! -f "$RT" ]; then
+  echo "no shared ASan runtime found (Linux: install clang's compiler-rt or gcc's libasan)" >&2; exit 1
+fi
 OUT=${OUT:-$ROOT/target/asan-results}
 mkdir -p "$OUT"
 env_run() {
@@ -32,7 +42,7 @@ env_run() {
 case $1 in
   build)
     cd "$ROOT" && PHP="$PHP" PHP_CONFIG="$PHP_CONFIG" CARGO_TARGET_DIR="$TD" RUSTFLAGS="-Zsanitizer=address" \
-      cargo +nightly build --profile fast --target "$HOST" -p revolt-ext -p revolt-embed-example
+      cargo +"$TOOLCHAIN" build --profile fast --target "$HOST" -p revolt-ext -p revolt-embed-example
     echo "$SO" ;;
   embed)
     # the embedding suite (both load orders, fallbacks) with the instrumented builds; the ABI
