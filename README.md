@@ -1,11 +1,11 @@
 # revolt-rs
 
-[revolt/event-loop](https://github.com/revoltphp/event-loop) 1.0.9, implemented natively in Rust as
+[revolt/event-loop](https://github.com/revoltphp/event-loop), implemented natively in Rust as
 a PHP extension (`revolt`). It registers the same classes at startup, so the PHP versions never
 load, and everything built on Revolt (Amp v3, your own code) runs unchanged on a native loop, 2–8×
 faster.
 
-- **Same API:** Reflection-identical to revolt/event-loop 1.0.9; its own test suite passes
+- **Same API:** Reflection-identical to revolt/event-loop; its own test suite passes
   unchanged. Every difference is listed, with the test that pins it, in
   [DIVERGENCES.md](DIVERGENCES.md) (notably: `EventLoop::setDriver()` throws, the loop always
   runs on its native driver).
@@ -23,8 +23,8 @@ pie install danog/revolt-rs
 
 Pre-built binaries for Linux, macOS and Windows; elsewhere [PIE](https://github.com/php/pie)
 builds from source (Rust + libclang). Keep requiring revolt/event-loop (or amphp/amp) as before:
-with the extension loaded, the PHP package is never used. danog/revolt-rs declares
-`"provide": {"revolt/event-loop": "1.0.9"}`, so a project that requires it through Composer
+with the extension loaded, the PHP package is never used. danog/revolt-rs declares that it
+provides revolt/event-loop, so a project that requires it through Composer
 doesn't install the PHP package at all.
 
 ## Performance
