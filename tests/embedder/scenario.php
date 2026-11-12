@@ -69,6 +69,40 @@ if (true) {
     $out['read'] = fread($a, 1);
 }
 
+// the idle check: nothing enabled (referenced or not), queued or armed
+$idle = [];
+$idle['start'] = revolt_embed_example_idle();
+$id = EventLoop::delay(10, static function (): void {});
+$idle['timer'] = revolt_embed_example_idle();
+EventLoop::unreference($id);
+$idle['unreferenced timer'] = revolt_embed_example_idle();
+EventLoop::disable($id);
+$idle['disabled timer'] = revolt_embed_example_idle();
+EventLoop::cancel($id);
+EventLoop::defer(static function (): void {});
+$idle['defer'] = revolt_embed_example_idle();
+EventLoop::run();
+EventLoop::queue(static function (): void {});
+$idle['microtask'] = revolt_embed_example_idle();
+EventLoop::run();
+$idle['after run'] = revolt_embed_example_idle();
+[$ia, $ib] = stream_socket_pair(DIRECTORY_SEPARATOR === '\\' ? STREAM_PF_INET : STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
+$fiber = new Fiber(static function () use ($ia): void { revolt_embed_example_src_wait($ia); });
+$fiber->start();
+$idle['fiber waiting on a source'] = revolt_embed_example_idle();
+fwrite($ib, 'i');
+EventLoop::run();
+$idle['source done'] = revolt_embed_example_idle();
+revolt_embed_example_src_forget($ia);
+if (DIRECTORY_SEPARATOR !== '\\' && $idle['start'] !== null) {
+    // (the PHP library's drivers need pcntl for signals)
+    $sig = EventLoop::onSignal(PHP_OS_FAMILY === 'Darwin' ? 31 : 12, static function (): void {});
+    EventLoop::unreference($sig);
+    $idle['signal watcher'] = revolt_embed_example_idle();
+    EventLoop::cancel($sig);
+}
+$out['idle'] = $idle;
+
 // sources: sockets waited for edge-triggered, outside the callback records
 $pair = static fn () => stream_socket_pair(DIRECTORY_SEPARATOR === '\\' ? STREAM_PF_INET : STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
 [$a, $b] = $pair();

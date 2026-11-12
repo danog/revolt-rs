@@ -19,7 +19,9 @@
 //!   "php" through the fallback (onReadable/onWritable);
 //! - `revolt_embed_example_src_forget(resource $stream): void` — forgets the source (before the
 //!   stream is closed);
-//! - `revolt_embed_example_src_stats(): array` — ["takes" => n, "flushes" => n] so far.
+//! - `revolt_embed_example_src_stats(): array` — ["takes" => n, "flushes" => n] so far;
+//! - `revolt_embed_example_idle(): ?bool` — whether the loop has nothing to do (null: no native
+//!   path).
 //!
 //! `REVOLT_EMBED_EXAMPLE_NO_REGISTER=1` in the environment makes MINIT skip class registration
 //! (to test the fallback against the PHP library).
@@ -378,6 +380,16 @@ unsafe extern "C" fn fn_src_stats(ex: *mut sys::zend_execute_data, rv: *mut sys:
     zval::write(rv, zval::arr_owned(arr));
 }
 
+unsafe extern "C" fn fn_idle(ex: *mut sys::zend_execute_data, rv: *mut sys::zval) {
+    if !revolt_rs::zpp!(ex, "") {
+        return;
+    }
+    match NativeLoop::current() {
+        Some(nl) => zval::write(rv, zval::bool(nl.idle(0))),
+        None => zval::write(rv, zval::null()),
+    }
+}
+
 fn functions() -> *const sys::zend_function_entry {
     let f = |name, handler, ret, args| -> Method { k::m(name, handler, 0, ret, args) };
     k::functions(vec![
@@ -390,6 +402,7 @@ fn functions() -> *const sys::zend_function_entry {
         f("revolt_embed_example_src_wait", revolt_rs::zh!(fn_src_wait), k::t(k::T_STRING), vec![a("stream", k::t(k::T_MIXED)), revolt_rs::zend::class::ad("writable", k::t(k::T_BOOL), "false")]),
         f("revolt_embed_example_src_forget", revolt_rs::zh!(fn_src_forget), k::t(k::T_VOID), vec![a("stream", k::t(k::T_MIXED))]),
         f("revolt_embed_example_src_stats", revolt_rs::zh!(fn_src_stats), k::t(k::T_ARRAY), vec![]),
+        f("revolt_embed_example_idle", revolt_rs::zh!(fn_idle), k::t(k::T_BOOL | k::T_NULL), vec![]),
     ])
 }
 

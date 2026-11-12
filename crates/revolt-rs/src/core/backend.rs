@@ -154,6 +154,8 @@ pub struct Reactor {
     groups: Vec<Option<Group>>,
     /// a group is waiting for its flush
     flush_pending: bool,
+    /// the sources armed for a wait
+    armed: usize,
 }
 
 /// macOS: the ident of the wait timer (EVFILT_TIMER idents are not fds)
@@ -184,6 +186,7 @@ impl Reactor {
             src: HashMap::default(),
             groups: Vec::new(),
             flush_pending: false,
+            armed: 0,
         }
     }
 
@@ -269,7 +272,15 @@ impl Reactor {
     pub fn src_close(&mut self, g: u32) -> bool {
         let Some(slot) = self.groups.get_mut((g as usize).wrapping_sub(1)) else { return false };
         let Some(old) = slot.take() else { return false };
-        self.src.retain(|_, e| e.group != g);
+        let mut gone = 0;
+        self.src.retain(|_, e| {
+            let keep = e.group != g;
+            if !keep && e.want != 0 {
+                gone += 1;
+            }
+            keep
+        });
+        self.armed -= gone;
         old.referenced
     }
 
@@ -304,8 +315,9 @@ impl Reactor {
         for (k, p) in fds.iter().enumerate().filter(|(_, p)| p.fd >= 0) {
             if let Err(err) = self.src_watch(g, p, token) {
                 for q in fds[..k].iter().filter(|q| q.fd >= 0) {
-                    if let Some(e) = self.src.get_mut(&q.fd).filter(|e| e.token == token) {
+                    if let Some(e) = self.src.get_mut(&q.fd).filter(|e| e.token == token && e.want != 0) {
                         e.want = 0;
+                        self.armed -= 1;
                     }
                 }
                 return Err(err);
@@ -317,8 +329,9 @@ impl Reactor {
     /// The wait `token` over `fds` ended: its sources are no longer armed for it.
     pub fn src_disarm(&mut self, fds: &[SrcFd], token: u64) {
         for p in fds {
-            if let Some(e) = self.src.get_mut(&p.fd).filter(|e| e.token == token) {
+            if let Some(e) = self.src.get_mut(&p.fd).filter(|e| e.token == token && e.want != 0) {
                 e.want = 0;
+                self.armed -= 1;
             }
         }
     }
@@ -326,7 +339,15 @@ impl Reactor {
     /// The source `fd` is about to be closed: its state goes (a later fd with its number is
     /// registered anew).
     pub fn src_forget(&mut self, fd: i64) {
-        self.src.remove(&fd);
+        if self.src.remove(&fd).is_some_and(|e| e.want != 0) {
+            self.armed -= 1;
+        }
+    }
+
+    /// The number of sources armed for a wait.
+    #[inline]
+    pub fn src_armed(&self) -> usize {
+        self.armed
     }
 
     /// Whether a poll left a group to flush.
@@ -361,6 +382,7 @@ impl Reactor {
                     self.flush_pending = true;
                     e.ready |= bits & !(e.want | ERR);
                     e.want = 0;
+                    self.armed -= 1;
                     return;
                 }
             }
@@ -369,7 +391,10 @@ impl Reactor {
         #[cfg(windows)]
         {
             // level-triggered: an armed source nobody takes would be reported at every poll
-            e.want = 0;
+            if e.want != 0 {
+                e.want = 0;
+                self.armed -= 1;
+            }
         }
     }
 
@@ -392,7 +417,9 @@ impl Reactor {
             }
         }
         let e = self.src.entry(p.fd).or_default();
-        *e = SrcEntry { group: g, registered: true, want: p.events as u8 & (READ | WRITE), token, ..*e };
+        let want = p.events as u8 & (READ | WRITE);
+        self.armed = self.armed + (want != 0) as usize - (e.want != 0) as usize;
+        *e = SrcEntry { group: g, registered: true, want, token, ..*e };
         Ok(())
     }
 
@@ -424,14 +451,18 @@ impl Reactor {
             }
         }
         let e = self.src.entry(p.fd).or_default();
-        *e = SrcEntry { group: g, registered: true, want: p.events as u8 & (READ | WRITE), token, ..*e };
+        let want = p.events as u8 & (READ | WRITE);
+        self.armed = self.armed + (want != 0) as usize - (e.want != 0) as usize;
+        *e = SrcEntry { group: g, registered: true, want, token, ..*e };
         Ok(())
     }
 
     #[cfg(windows)]
     fn src_watch(&mut self, g: u32, p: &SrcFd, token: u64) -> Result<(), i32> {
         let e = self.src.entry(p.fd).or_default();
-        *e = SrcEntry { group: g, registered: true, want: p.events as u8 & (READ | WRITE), token, ..*e };
+        let want = p.events as u8 & (READ | WRITE);
+        self.armed = self.armed + (want != 0) as usize - (e.want != 0) as usize;
+        *e = SrcEntry { group: g, registered: true, want, token, ..*e };
         Ok(())
     }
 

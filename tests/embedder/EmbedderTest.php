@@ -65,6 +65,13 @@ final class EmbedderTest extends TestCase
             self::assertSame($path, $r['wait_readable']);
             self::assertSame('x', $r['read']);
         }
+        $idle = ['start' => true, 'timer' => false, 'unreferenced timer' => false, 'disabled timer' => true,
+            'defer' => false, 'microtask' => false, 'after run' => true, 'fiber waiting on a source' => false,
+            'source done' => true];
+        if (\DIRECTORY_SEPARATOR !== '\\' && $path === 'native') {
+            $idle['signal watcher'] = false;
+        }
+        self::assertSame($path === 'native' ? $idle : \array_map(static fn () => null, $idle), $r['idle']);
         self::assertSame($path, $r['src_wait']);
         self::assertSame('x', $r['src_read']);
         self::assertTrue($r['queued_after_main_wait']);

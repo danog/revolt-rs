@@ -241,6 +241,8 @@ pub struct Core {
     pub tick_blocking: bool,
     /// enabled and referenced callbacks (isEmpty() is `== 0`)
     pub live: usize,
+    /// enabled callbacks, referenced or not (the embedding API's idle check)
+    pub enabled_n: usize,
     pub callback_fiber: Zv,
     /// the fiber that last suspended with the internal marker
     pub yielded: *mut sys::zend_object,
@@ -282,6 +284,7 @@ impl Core {
             signals: signal::Watchers::default(),
             tick_blocking: false,
             live: 0,
+            enabled_n: 0,
             callback_fiber: Zv::undef(),
             yielded: null_mut(),
             suspensions: WeakTable::new(),
@@ -370,6 +373,7 @@ impl Core {
             view: null_mut(),
         });
         self.live += 1;
+        self.enabled_n += 1;
         self.callbacks.entry(id).or_insert(rec)
     }
 
@@ -437,6 +441,11 @@ impl Core {
         if let Some(r) = self.callbacks.get_mut(&id) {
             if r.enabled != on {
                 r.enabled = on;
+                if on {
+                    self.enabled_n += 1;
+                } else {
+                    self.enabled_n -= 1;
+                }
                 if r.referenced {
                     if on {
                         self.live += 1;
@@ -477,6 +486,9 @@ impl Core {
         let mut r = self.callbacks.remove(&id)?;
         if r.enabled && r.referenced {
             self.live -= 1;
+        }
+        if r.enabled {
+            self.enabled_n -= 1;
         }
         if r.heap_pos != usize::MAX {
             let pos = r.heap_pos;

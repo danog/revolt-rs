@@ -28,8 +28,8 @@ use std::sync::OnceLock;
 /// The ABI major version: a copy uses another copy's table only with the same major and a size
 /// at least as large as its own.
 pub const ABI_MAJOR: u32 = 1;
-/// 1: the sources (`src_*`)
-pub const ABI_MINOR: u32 = 1;
+/// 1: the sources (`src_*`); 2: `idle`
+pub const ABI_MINOR: u32 = 2;
 
 /// The C-ABI function table of a revolt-rs copy. Drivers and suspensions are `zend_object`s;
 /// functions returning bool return false with a PHP exception pending (or for an invalid id).
@@ -87,6 +87,13 @@ pub struct Abi {
     pub src_disarm: unsafe extern "C" fn(*mut sys::zend_object, *const SrcFd, usize, u64),
     /// A source is about to be closed.
     pub src_forget: unsafe extern "C" fn(*mut sys::zend_object, i64),
+    // ---- minor 2
+    /// Whether the loop has nothing to do (O(1)): no enabled callback (referenced or not:
+    /// watchers, timers, defers, signals) except `except` (an id of the caller's, 0: none), no
+    /// queued callback or microtask, no armed source, no pending interrupt, and the loop not
+    /// running. Then a `{main}` call may block in its own I/O instead of running the loop: nothing
+    /// but that call's own I/O could happen meanwhile (only this thread runs PHP code).
+    pub idle: unsafe extern "C" fn(*mut sys::zend_object, u64) -> bool,
 }
 
 unsafe impl Sync for Abi {}
@@ -205,6 +212,22 @@ unsafe extern "C" fn abi_src_forget(d: *mut sys::zend_object, fd: i64) {
     D(d).c().reactor.src_forget(fd)
 }
 
+unsafe extern "C" fn abi_idle(d: *mut sys::zend_object, except: u64) -> bool {
+    let c = D(d).c();
+    let mut n = c.enabled_n;
+    if n == 1 && except != 0 && c.callbacks.get(&except).is_some_and(|r| r.enabled) {
+        n = 0;
+    }
+    n == 0
+        && c.callback_queue.is_empty()
+        && c.microtasks.is_empty()
+        && c.enable_queue_len == 0
+        && c.defer_queue_len == 0
+        && c.interrupt.is_none()
+        && c.in_loop.is_null()
+        && c.reactor.src_armed() == 0
+}
+
 // test builds only (tools/embed-test.sh): an owner whose table another copy must refuse
 #[cfg(feature = "test-abi-major-mismatch")]
 const EXPORTED_MAJOR: u32 = ABI_MAJOR + 1;
@@ -260,6 +283,7 @@ pub static revolt_rs_abi_v1: Abi = Abi {
     src_arm: abi_src_arm,
     src_disarm: abi_src_disarm,
     src_forget: abi_src_forget,
+    idle: abi_idle,
 };
 
 struct AbiRef(Option<&'static Abi>);
@@ -484,6 +508,12 @@ impl NativeLoop {
     /// The source `fd` is about to be closed (a later fd with its number is registered anew).
     pub unsafe fn src_forget(&self, fd: i64) {
         (self.abi.src_forget)(self.driver, fd)
+    }
+
+    /// Whether the loop has nothing to do but the caller's callback `except` (0: none): see
+    /// `Abi::idle`.
+    pub unsafe fn idle(&self, except: u64) -> bool {
+        (self.abi.idle)(self.driver, except)
     }
 }
 
