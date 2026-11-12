@@ -410,7 +410,12 @@ impl Core {
 
     /// Drains an enable queue: the ids still queued, in order (marked not queued).
     pub fn take_queue(&mut self, defer: bool) -> Vec<u64> {
-        let q = std::mem::take(if defer { &mut self.defer_queue } else { &mut self.enable_queue });
+        let q = if defer { &mut self.defer_queue } else { &mut self.enable_queue };
+        if q.is_empty() {
+            // every tick: nothing to take, nothing to free
+            return Vec::new();
+        }
+        let q = std::mem::take(q);
         if defer {
             self.defer_queue_len = 0;
         } else {
