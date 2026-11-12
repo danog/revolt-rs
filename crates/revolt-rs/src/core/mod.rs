@@ -165,8 +165,6 @@ pub struct Record {
     pub qgen: u32,
     /// activated in the reactor (fd registered / timer in the heap / signal watched)
     pub active: bool,
-    /// position in the timer heap (usize::MAX: not in it)
-    pub heap_pos: usize,
     /// the DriverCallback object handed to PHP code (userland drivers), or null
     pub view: *mut sys::zend_object,
 }
@@ -184,6 +182,14 @@ impl Record {
             self.id_str = unsafe { zstr::new(id_bytes(self.id).as_bytes()) };
         }
         self.id_str
+    }
+
+    /// The id's string, owned by the caller from now on (the record has none then).
+    #[inline]
+    pub fn take_id_zstr(&mut self) -> *mut sys::zend_string {
+        let s = self.id_zstr();
+        self.id_str = null_mut();
+        s
     }
 
     pub fn closure_obj(&self) -> *mut sys::zend_object {
@@ -547,7 +553,6 @@ impl Core {
             queued: false,
             qgen: 0,
             active: false,
-            heap_pos: usize::MAX,
             view: null_mut(),
         })
     }
@@ -576,7 +581,7 @@ impl Core {
 
     /// unset($this->enableQueue[$id]) / unset($this->enableDeferQueue[$id]) of `r` (counted).
     #[inline]
-    fn unqueue(r: &mut Record, enable_len: &mut usize, defer_len: &mut usize) -> bool {
+    pub(crate) fn unqueue(r: &mut Record, enable_len: &mut usize, defer_len: &mut usize) -> bool {
         if !r.queued {
             return false;
         }
@@ -624,7 +629,7 @@ impl Core {
 
     /// The enabled flag of `r`, counted (and written through to its view).
     #[inline]
-    fn enabled(r: &mut Record, on: bool, live: &mut usize, enabled_n: &mut usize) {
+    pub(crate) fn enabled(r: &mut Record, on: bool, live: &mut usize, enabled_n: &mut usize) {
         if r.enabled == on {
             return;
         }
@@ -647,20 +652,6 @@ impl Core {
         if let Some(r) = self.callbacks.get(id) {
             Self::enabled(r, on, &mut self.live, &mut self.enabled_n);
         }
-    }
-
-    /// disable()'s bookkeeping in one lookup: the record is disabled, not invokable and not
-    /// queued. Some((kind, was queued)) when it was enabled; None otherwise (or unknown).
-    pub fn disable_record(&mut self, id: u64) -> Option<(Kind, bool)> {
-        let r = self.callbacks.get(id)?;
-        if !r.enabled {
-            return None;
-        }
-        Self::enabled(r, false, &mut self.live, &mut self.enabled_n);
-        r.invokable = false;
-        view_set_bool(r.view, ViewProp::Invokable, false);
-        let was_queued = Self::unqueue(r, &mut self.enable_queue_len, &mut self.defer_queue_len);
-        Some((r.kind, was_queued))
     }
 
     pub fn set_referenced(&mut self, id: u64, on: bool) {
@@ -696,10 +687,8 @@ impl Core {
                 self.live -= 1;
             }
         }
-        let pos = std::mem::replace(&mut r.heap_pos, usize::MAX);
-        if pos != usize::MAX {
-            self.timers.remove(&mut self.callbacks, pos);
-        }
+        let slot = r.slot;
+        self.timers.remove(slot);
         self.callbacks.remove(id)
     }
 

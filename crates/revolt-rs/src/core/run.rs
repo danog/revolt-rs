@@ -133,11 +133,24 @@ pub fn enable(d: D, id: u64) -> Option<bool> {
 
 /// disable(): false when deactivate() threw.
 pub fn disable(d: D, id: u64) -> bool {
-    match d.c().disable_record(id) {
-        // unknown, disabled already, only queued to be enabled, or a defer
-        None | Some((_, true)) | Some((Kind::Defer, false)) => true,
-        Some(_) => deactivate(d, id),
+    let c = d.c();
+    let Some(r) = c.callbacks.get(id) else { return true };
+    if !r.enabled {
+        return true;
     }
+    Core::enabled(r, false, &mut c.live, &mut c.enabled_n);
+    r.invokable = false;
+    super::view_set_bool(r.view, super::ViewProp::Invokable, false);
+    if Core::unqueue(r, &mut c.enable_queue_len, &mut c.defer_queue_len) || r.kind == Kind::Defer {
+        // only queued to be enabled, or a defer
+        return true;
+    }
+    if c.hooks.deactivate.is_some() {
+        return deactivate(d, id);
+    }
+    let plan = deactivation(r);
+    deactivate_apply(c, plan);
+    true
 }
 
 /// cancel(): $this->disable() (a userland override is called), then forgotten.
@@ -366,7 +379,7 @@ fn activate_native(c: &mut Core, cid: Cid) -> Result<(), ActivateError> {
         }
         Kind::Delay | Kind::Repeat => {
             r.active = true;
-            c.timers.insert(&mut c.callbacks, cid.slot);
+            c.timers.insert(cid, r.expiration);
         }
         Kind::Signal => {
             let sig = r.signal;
@@ -406,7 +419,7 @@ fn deactivate(d: D, id: u64) -> bool {
 enum Deactivation {
     None,
     Fd { fd: i64, id: u64, dir: u8, php_reader: bool },
-    Timer { pos: usize },
+    Timer { slot: u32 },
     Signal { sig: i32, id: u64 },
 }
 
@@ -426,11 +439,7 @@ fn deactivation(r: &mut super::Record) -> Deactivation {
             },
             None => Deactivation::None,
         },
-        Kind::Delay | Kind::Repeat if r.heap_pos != usize::MAX => {
-            let pos = r.heap_pos;
-            r.heap_pos = usize::MAX;
-            Deactivation::Timer { pos }
-        }
+        Kind::Delay | Kind::Repeat => Deactivation::Timer { slot: r.slot },
         Kind::Signal => Deactivation::Signal { sig: r.signal, id: r.id },
         _ => Deactivation::None,
     }
@@ -445,7 +454,7 @@ fn deactivate_apply(c: &mut Core, d: Deactivation) {
                 c.reactor.stream_readers -= 1;
             }
         }
-        Deactivation::Timer { pos } => c.timers.remove(&mut c.callbacks, pos),
+        Deactivation::Timer { slot } => c.timers.remove(slot),
         Deactivation::Signal { sig, id } => {
             c.signals.remove(sig, id);
             c.reactor.set_wake(c.signals.wake_fd());
@@ -453,7 +462,7 @@ fn deactivate_apply(c: &mut Core, d: Deactivation) {
     }
 }
 
-/// Takes `r` (removed from the table: its heap position was cleared then) out of the reactor.
+/// Takes `r` (removed from the table, and from the timer heap then) out of the reactor.
 fn deactivate_record(c: &mut Core, r: &mut super::Record) {
     let d = deactivation(r);
     deactivate_apply(c, d);
@@ -531,7 +540,7 @@ fn dispatch_native(c: &mut Core, mut blocking: bool) {
     }
     if c.timers.len() > 0 {
         let now = clock::now();
-        while let Some(cid) = c.timers.pop_expired(&mut c.callbacks, now) {
+        while let Some(cid) = c.timers.pop_expired(now) {
             c.enqueue(cid);
         }
     }
@@ -849,6 +858,9 @@ unsafe extern "C" fn callback_fiber_body(ex: call::Ex, _rv: *mut sys::zval) {
 unsafe fn invoke_callback(d: D, cid: Cid) -> bool {
     let id = cid.id;
     let c = d.c();
+    // no PHP code runs during the cancel() of a callback fired once (a native driver): what the
+    // call needs moves out of the record instead of being copied
+    let native_cancel = c.hooks.cancel.is_none() && c.hooks.disable.is_none() && c.hooks.deactivate.is_none();
     let Some(r) = c.callbacks.at_id(cid) else { return true };
     if !r.invokable {
         return true;
@@ -870,8 +882,17 @@ unsafe fn invoke_callback(d: D, cid: Cid) -> bool {
         Cb::Taken => return true,
     };
     let fiber = zend::active_fiber();
-    let id_str = if let Cb::Php { .. } = r.cb { r.id_zstr() } else { null_mut() };
-    let callee = if let Cb::Php { closure, callee } = &r.cb {
+    let is_php = matches!(r.cb, Cb::Php { .. });
+    let id_str = if is_php { r.id_zstr() } else { null_mut() };
+    let callee = if fired_once && native_cancel && is_php {
+        let Cb::Php { closure, callee } = &mut r.cb else { unreachable!() };
+        let (closure, callee) = (closure.take(), *callee);
+        // the record keeps nothing to release: its closure and id string are the frame's now
+        std::mem::forget(std::mem::replace(&mut r.cb, Cb::Taken));
+        let id_str = zval::str_owned(r.take_id_zstr());
+        fiber::inflight::hold(fiber, [closure, id_str]);
+        Some(callee)
+    } else if let Cb::Php { closure, callee } = &r.cb {
         // what the call needs, kept even if the callback is cancelled before it runs; held where
         // the cycle collector sees it (the callback fiber's frames, in Revolt)
         let third = match kind {
