@@ -19,6 +19,7 @@
 //!   (the same next timer) changes nothing, so it costs no kernel timer work.
 
 use std::collections::HashMap;
+use std::hash::BuildHasherDefault;
 use std::sync::atomic::AtomicU64;
 #[cfg(unix)]
 use std::sync::atomic::Ordering;
@@ -68,7 +69,11 @@ impl FdEntry {
 }
 
 pub struct Reactor {
-    pub fds: HashMap<i64, FdEntry>,
+    pub fds: HashMap<i64, FdEntry, BuildHasherDefault<super::IdHasher>>,
+    /// the active readable callbacks of PHP streams (whose read buffers a blocking poll checks)
+    pub stream_readers: usize,
+    /// the entries marked `always` (so that a poll looks for them only when there are some)
+    n_always: usize,
     dirty: Vec<i64>,
     #[cfg(unix)]
     poller: i32,
@@ -99,7 +104,9 @@ pub type Ready = (i64, bool, bool);
 impl Reactor {
     pub fn new() -> Reactor {
         Reactor {
-            fds: HashMap::new(),
+            fds: HashMap::default(),
+            stream_readers: 0,
+            n_always: 0,
             dirty: Vec::new(),
             #[cfg(unix)]
             poller: -1,
@@ -126,7 +133,10 @@ impl Reactor {
         if e.want() == 0 || e.res != res {
             // the fd may have been closed and reused since it was registered: register anew
             e.registered = 0;
-            e.always = false;
+            if e.always {
+                e.always = false;
+                self.n_always -= 1;
+            }
             e.res = res;
         }
         if dir == READ {
@@ -171,7 +181,7 @@ impl Reactor {
 
     /// Whether some watched fd is always ready (the poll must not block).
     pub fn has_always(&self) -> bool {
-        self.fds.values().any(|e| e.always && e.want() != 0)
+        self.n_always > 0 && self.fds.values().any(|e| e.always && e.want() != 0)
     }
 
     /// Polls for readiness for at most `timeout` seconds (None: no limit), which end at
@@ -181,12 +191,14 @@ impl Reactor {
         self.check_fork();
         self.apply();
         let mut timeout = timeout;
-        for (&fd, e) in self.fds.iter() {
-            if e.always {
-                let w = e.want();
-                if w != 0 {
-                    out.push((fd, w & READ != 0, w & WRITE != 0));
-                    timeout = Some(0.0);
+        if self.n_always > 0 {
+            for (&fd, e) in self.fds.iter() {
+                if e.always {
+                    let w = e.want();
+                    if w != 0 {
+                        out.push((fd, w & READ != 0, w & WRITE != 0));
+                        timeout = Some(0.0);
+                    }
                 }
             }
         }
@@ -245,6 +257,7 @@ impl Reactor {
                 self.dirty.push(fd);
             }
         }
+        self.n_always = 0;
     }
 
     #[cfg(windows)]
@@ -259,6 +272,9 @@ impl Reactor {
             let want = e.want();
             if want == 0 {
                 let had = e.registered;
+                if e.always {
+                    self.n_always -= 1;
+                }
                 self.fds.remove(&fd);
                 #[cfg(unix)]
                 if had != 0 {
@@ -282,6 +298,7 @@ impl Reactor {
                     // refused (a regular file, a closed fd): select would report it ready
                     e.always = true;
                     e.registered = 0;
+                    self.n_always += 1;
                 }
             }
             #[cfg(windows)]

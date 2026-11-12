@@ -355,6 +355,9 @@ fn activate_native(c: &mut Core, id: u64) -> Result<(), ActivateError> {
             let dir = if r.kind == Kind::Readable { backend::READ } else { backend::WRITE };
             r.active = true;
             c.reactor.add(h.fd, h.socket, h.res, id, dir);
+            if dir == backend::READ && !zval::is_null(&r.stream.0) {
+                c.reactor.stream_readers += 1;
+            }
         }
         Kind::Delay | Kind::Repeat => {
             r.active = true;
@@ -408,6 +411,9 @@ fn deactivate_record(c: &mut Core, r: &mut super::Record) {
         Kind::Readable | Kind::Writable => {
             if let Some(h) = r.handle {
                 c.reactor.del(h.fd, r.id, if r.kind == Kind::Readable { backend::READ } else { backend::WRITE });
+                if r.kind == Kind::Readable && !zval::is_null(&r.stream.0) {
+                    c.reactor.stream_readers -= 1;
+                }
             }
         }
         Kind::Delay | Kind::Repeat => {
@@ -499,6 +505,10 @@ fn dispatch_native(c: &mut Core, mut blocking: bool) {
 /// such streams readable at once).
 fn buffered_readers(c: &mut Core) -> Vec<u64> {
     let mut buffered = Vec::new();
+    if c.reactor.stream_readers == 0 {
+        // only raw handles (embedders' sockets): no PHP buffers
+        return buffered;
+    }
     for e in c.reactor.fds.values() {
         for &id in &e.readers {
             if let Some(r) = c.callbacks.get_mut(&id) {
