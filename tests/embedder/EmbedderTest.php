@@ -75,7 +75,10 @@ final class EmbedderTest extends TestCase
         self::assertSame($path, $r['src_wait']);
         self::assertSame('x', $r['src_read']);
         self::assertTrue($r['queued_after_main_wait']);
-        self::assertSame($path === 'native' ? 'ready' : $path, $r['src_ready']);
+        // Windows polls a source only while it is armed (level-triggered): readiness is found by
+        // the wait itself there, not kept from an earlier poll (EMBEDDING.md, "Sources")
+        $ready = \DIRECTORY_SEPARATOR === '\\' ? 'native' : 'ready';
+        self::assertSame($path === 'native' ? $ready : $path, $r['src_ready']);
         self::assertSame('y', $r['src_read_ready']);
         self::assertSame([$path, $path, $path], $r['src_fibers']);
         self::assertSame($path === 'native' ? ['takes' => 3, 'flushes' => 1] : ['takes' => 0, 'flushes' => 0], $r['src_batch']);
