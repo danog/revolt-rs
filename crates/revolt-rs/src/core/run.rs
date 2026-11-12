@@ -999,13 +999,17 @@ fn invoke_microtasks(d: D) -> bool {
                     let c = d.c();
                     let Some(callee) = call::callee_of(closure.obj()) else {
                         // (never: a Closure) its arguments go with it
-                        c.microtask_args.drain(..nargs as usize);
+                        for _ in 0..nargs {
+                            c.microtask_args.pop_front();
+                        }
                         continue;
                     };
                     // the closure, the named arguments, then the arguments: held where the
                     // cycle collector sees them while the call runs
                     let (mut closure, mut named) = (closure, named);
-                    let args = c.microtask_args.drain(..nargs as usize).map(|mut a| a.take());
+                    let queued = &mut c.microtask_args;
+                    // (pop_front: a Drain's drop is not free, even for none)
+                    let args = (0..nargs).map(|_| queued.pop_front().map_or_else(zval::undef, |mut a| a.take()));
                     let (p, n) = fiber::inflight::hold(fiber, [closure.take(), named.take()].into_iter().chain(args));
                     let named_ht = if zval::ty(&*p.add(1)) == zval::ARRAY { (&*p.add(1)).value.arr } else { null_mut() };
                     let params = std::slice::from_raw_parts_mut(p.add(2), n - 2);
