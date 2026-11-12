@@ -25,37 +25,40 @@ passes on both, so it shows behaviour that is the same.
 
 ## Behaviour
 
+- **One driver class.** revolt-rs has `Revolt\EventLoop\Driver\NativeDriver` (final, extends
+  `Internal\AbstractDriver`, `getHandle()` is null) instead of revolt/event-loop's
+  `StreamSelectDriver`, `EvDriver`, `EventDriver` and `UvDriver`, which do not exist.
+  `EventLoop::getDriver()` and `DriverFactory::create()` return a NativeDriver (the factory wraps it
+  in a `TracingDriver` with `REVOLT_DRIVER_DEBUG_TRACE`, as before); `REVOLT_DRIVER` selects nothing
+  and is ignored (`DriverFactory::createDriverFromEnv()` returns null). The rest of the API is
+  unchanged (`TracingDriver`, `DriverFactory`, PHP subclasses of `AbstractDriver`). Revolt's
+  driver suite runs against NativeDriver (tests/NOT_APPLICABLE.md). Pinned by
+  `NativeDriverTest::testOnlyNativeDriver` and `SetDriverTest`; `tools/dump-api.php diff` reports
+  exactly this as the expected difference.
 - **The loop's driver cannot be replaced.** `EventLoop::setDriver()` always throws
   `UnsupportedFeatureException("Revolt\EventLoop::setDriver() is not supported: the event loop
   always runs on its native driver")` (after its argument check) and changes nothing:
   `EventLoop::getDriver()` is always the native driver the loop made, so extensions embedding
   revolt-rs (a database driver's I/O, say) always share one native loop with PHP code. Writing
   `EventLoop::$driver` (Reflection, a bound closure) does not change it either. The loop makes its
-  driver as `DriverFactory::create()` would, except that `REVOLT_DRIVER` is honoured only when it
-  names one of the four built-in driver classes (all the same native driver) and
-  `REVOLT_DRIVER_DEBUG_TRACE` is ignored. `DriverFactory::create()`, the `Driver\*` classes,
-  `TracingDriver` and PHP subclasses of `AbstractDriver` are unchanged: such drivers work when
-  used directly (`$driver->run()`), they just never become the loop's. Revolt's own tests that
-  swap the driver are excluded (tests/NOT_APPLICABLE.md). Pinned by `SetDriverTest` and
+  driver as a NativeDriver; `REVOLT_DRIVER_DEBUG_TRACE` is ignored there. Other NativeDriver
+  objects, `TracingDriver` and PHP subclasses of `AbstractDriver` work when used directly
+  (`$driver->run()`), they just never become the loop's. Revolt's own tests that swap the driver are excluded (tests/NOT_APPLICABLE.md). Pinned by `SetDriverTest` and
   `tests/native/destruction_order.phpt`.
-- **No FD_SETSIZE limit.** StreamSelectDriver uses epoll/kqueue/WSAPoll: any number of streams,
+- **No FD_SETSIZE limit.** NativeDriver uses epoll/kqueue/WSAPoll: any number of streams,
   no "You have reached the limits of stream_select()" exception. Pinned by
   `NoFdSetSizeLimitTest`.
-- **All four driver classes share the native reactor.** EvDriver, EventDriver and UvDriver keep
-  `isSupported()` (ext-ev/event/uv loaded), their constructor's requirement of the extension and
-  `getHandle()` (an `\EvLoop`, `\EventBase` or uv loop created at construction) — but that
-  handle is not driven by the loop: watchers user code adds to it directly never fire. Pinned by
-  `DriverHandleTest`.
-- **Signals without ext-pcntl.** onSignal() works on Unix for every driver class (a sigaction
-  handler of the extension); StreamSelectDriver does not need pcntl. When the last callback of a
+- **Signals without ext-pcntl.** onSignal() works on Unix (a sigaction handler of the
+  extension); unlike revolt/event-loop's StreamSelectDriver, NativeDriver does not need pcntl. When the last callback of a
   signal goes, the disposition the signal had before is restored (revolt/event-loop sets
   SIG_DFL). Registration failures throw `UnsupportedFeatureException("Failed to register signal
   handler; Errno: N; <strerror>")` from the loop, as Revolt's do (the message text differs).
   Windows: `UnsupportedFeatureException("Signal handling requires the pcntl extension")`. Pinned
   by `SignalTest`.
-- **Data in PHP's stream read buffer** makes a readable callback fire at once for every driver
-  class (stream_select does this; ev/event/uv do not). Pinned by
-  `StreamTest::testBufferedDataIsReadable`.
+- **Data in PHP's stream read buffer** makes a readable callback fire at once, as with
+  revolt/event-loop's StreamSelectDriver (its ev/event/uv drivers do not look at the buffer).
+  Pinned by `StreamTest::testBufferedDataIsReadable` (which the library's StreamSelectDriver
+  passes too).
 - **Streams that are not streams.** A readable/writable callback whose stream is not a valid
   stream resource when it is activated (closed, or not a stream) throws a `TypeError` from the
   loop ("Invalid stream for callback x: ..."); revolt/event-loop fails in stream_select() or an

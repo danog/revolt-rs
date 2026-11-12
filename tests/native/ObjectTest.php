@@ -6,7 +6,7 @@ namespace RevoltRs\Tests;
 
 use PHPUnit\Framework\TestCase;
 use Revolt\EventLoop;
-use Revolt\EventLoop\Driver\StreamSelectDriver;
+use Revolt\EventLoop\Driver\NativeDriver;
 use Revolt\EventLoop\Driver\TracingDriver;
 use Revolt\EventLoop\Internal\DriverSuspension;
 
@@ -17,9 +17,9 @@ final class ObjectTest extends TestCase
 
     public static function uncloneable(): iterable
     {
-        yield 'driver' => [static fn () => new StreamSelectDriver(), StreamSelectDriver::class];
-        yield 'tracing driver' => [static fn () => new TracingDriver(new StreamSelectDriver()), TracingDriver::class];
-        yield 'suspension' => [static fn () => (new StreamSelectDriver())->getSuspension(), DriverSuspension::class];
+        yield 'driver' => [static fn () => new NativeDriver(), NativeDriver::class];
+        yield 'tracing driver' => [static fn () => new TracingDriver(new NativeDriver()), TracingDriver::class];
+        yield 'suspension' => [static fn () => (new NativeDriver())->getSuspension(), DriverSuspension::class];
     }
 
     /** @dataProvider uncloneable */

@@ -45,10 +45,8 @@ jobs:
         with:
           php-version: ${{ matrix.php }}
           tools: composer
-          # ev and event: their driver classes' tests, where they build (ext-uv has no maintained
-          # PECL release for every version; ev 1.2.3 and event do not build on 8.6 yet: those tests
-          # skip); pcntl and posix: the signal and fork tests (Unix); mbstring: PHPUnit (Windows)
-          extensions: ${{ startsWith(matrix.os, 'windows') && 'sockets, mbstring' || matrix.php == '8.6' && 'sockets, pcntl, posix' || 'ev, sockets, event, pcntl, posix' }}
+          # pcntl and posix: the signal and fork tests (Unix); mbstring: PHPUnit (Windows)
+          extensions: ${{ startsWith(matrix.os, 'windows') && 'sockets, mbstring' || 'sockets, pcntl, posix' }}
           ini-values: zend.assertions=1
           coverage: none
 

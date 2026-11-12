@@ -1,16 +1,16 @@
-//! Internal\AbstractDriver and the Driver\* classes over the native core.
+//! Internal\AbstractDriver and Driver\NativeDriver over the native core.
 //!
-//! StreamSelectDriver, EvDriver, EventDriver and UvDriver are the same native driver (the
-//! reactor in core::backend); the class name keeps isSupported() and getHandle(). PHP classes
+//! NativeDriver stands for revolt/event-loop's four driver classes (StreamSelectDriver,
+//! EvDriver, EventDriver, UvDriver), which revolt-rs does not have (DIVERGENCES.md). PHP classes
 //! extending AbstractDriver get the native core too: their activate()/dispatch()/deactivate()/
 //! now() are called by it, and their overrides of public methods are honoured where Revolt's
 //! own code calls `$this->method()`.
 
-use super::{arg as a, ce, method as m, suspension, Ces, F_PRI as PRI, F_PRO as PRO, F_PUB as PUB, F_STA as STA};
-use super::{T_A, T_B, T_CL, T_DCB, T_F, T_I, T_MIX, T_S, T_V};
+use super::{arg as a, ce, method as m, suspension, Ces, F_PRO as PRO, F_PUB as PUB};
+use super::{T_A, T_B, T_DCB, T_F, T_MIX, T_V};
 use crate::core::run::{self, Step, D};
 use crate::core::{clock, Core, Desc, DriverKind, Kind, Microtask, Phase};
-use crate::zend::class::{self as k, c, Default as Dv, NONE};
+use crate::zend::class::{self as k, NONE};
 use crate::zend::{call, call::Ex, hash, obj, sys, zstr, zval, zval::Zv};
 use crate::{zh, zpp};
 use std::ptr::null_mut;
@@ -51,15 +51,8 @@ pub unsafe fn native_for(o: *mut sys::zend_object, bit: u64) -> bool {
 }
 
 fn kind_of(ce: *mut sys::zend_class_entry) -> DriverKind {
-    let c = super::ce();
-    if ce == c.stream_select {
-        DriverKind::StreamSelect
-    } else if ce == c.ev {
-        DriverKind::Ev
-    } else if ce == c.event {
-        DriverKind::Event
-    } else if ce == c.uv {
-        DriverKind::Uv
+    if ce == super::ce().native {
+        DriverKind::Native
     } else {
         DriverKind::User
     }
@@ -232,37 +225,6 @@ pub unsafe extern "C" fn construct(ex: Ex, _rv: *mut sys::zval) {
         return;
     }
     check_php_gc_bug();
-    if call::has_exception() {
-        return;
-    }
-    let d = D(call::this(ex));
-    let c = d.c();
-    let need = match c.kind {
-        DriverKind::Ev => Some(("evloop", "EvLoop")),
-        DriverKind::Event => Some(("eventbase", "EventBase")),
-        _ => None,
-    };
-    if let Some((lc, name)) = need {
-        let cls = call::lookup_class(lc.as_bytes());
-        if cls.is_null() {
-            call::throw_error(&format!("Class \"{name}\" not found"));
-            return;
-        }
-        let o = call::new_object(cls, &mut []);
-        if !o.is_null() {
-            d.c().handle.set(zval::obj_owned(o));
-        }
-    } else if c.kind == DriverKind::Uv {
-        if !extension_loaded(b"uv") {
-            call::throw_error("Call to undefined function uv_loop_new()");
-            return;
-        }
-        let mut fname = zval::string(b"uv_loop_new");
-        let mut rv = Zv::undef();
-        sys::_call_user_function_impl(null_mut(), &mut *fname, rv.as_ptr(), 0, null_mut(), null_mut());
-        zval::dtor(&mut fname);
-        d.c().handle.set(rv.take());
-    }
 }
 
 /// AbstractDriver::__construct()'s check: PHP 8.2.0 to 8.2.3 have fiber GC bugs (php-src #10496).
@@ -760,48 +722,24 @@ pub unsafe extern "C" fn native_now(ex: Ex, rv: *mut sys::zval) {
     zval::write(rv, zval::double(clock::now()));
 }
 
+/// NativeDriver::getHandle(): there is no underlying loop object.
 pub unsafe extern "C" fn get_handle(ex: Ex, rv: *mut sys::zval) {
     if !call::none(ex) {
         return;
     }
-    let c = D(call::this(ex)).c();
-    if zval::is_undef(&c.handle.0) {
-        zval::write(rv, zval::null());
-    } else {
-        zval::write(rv, zval::copy(&c.handle.0));
-    }
+    zval::write(rv, zval::null());
 }
 
 pub unsafe extern "C" fn destruct(ex: Ex, _rv: *mut sys::zval) {
     if !call::none(ex) {
         return;
     }
-    // StreamSelectDriver::__destruct(): signal handlers go (the dispositions are restored)
+    // as StreamSelectDriver::__destruct(): signal handlers go (the dispositions are restored)
     let d = D(call::this(ex));
     let ids: Vec<u64> = d.c().callbacks.values().filter(|r| r.kind == Kind::Signal && r.active).map(|r| r.id).collect();
     for id in ids {
         run::deactivate_one(d, id);
     }
-}
-
-pub unsafe extern "C" fn is_supported_ev(_ex: Ex, rv: *mut sys::zval) {
-    zval::write(rv, zval::bool(extension_loaded(b"ev")));
-}
-
-pub unsafe extern "C" fn is_supported_event(_ex: Ex, rv: *mut sys::zval) {
-    zval::write(rv, zval::bool(extension_loaded(b"event")));
-}
-
-pub unsafe extern "C" fn is_supported_uv(_ex: Ex, rv: *mut sys::zval) {
-    zval::write(rv, zval::bool(extension_loaded(b"uv")));
-}
-
-pub unsafe extern "C" fn private_float(_ex: Ex, rv: *mut sys::zval) {
-    zval::write(rv, zval::double(0.0));
-}
-
-pub unsafe extern "C" fn private_int(_ex: Ex, rv: *mut sys::zval) {
-    zval::write(rv, zval::long(0));
 }
 
 /// The handler of an AbstractDriver method by name.
@@ -835,87 +773,19 @@ pub fn handler(name: &'static str) -> k::Handler {
     }
 }
 
-/// The four native driver classes and EventLoop::setDriver()'s garbage-collection driver.
+/// Driver\NativeDriver.
 pub unsafe fn register_drivers(ces: &mut Ces) {
     HANDLERS = obj::handlers::<DriverState>();
-    let hooks = || {
-        vec![
-            m("__construct", zh!(construct), PUB, NONE, vec![]),
-            m("__destruct", zh!(destruct), PUB, NONE, vec![]),
-            m("activate", zh!(native_activate), PRO, T_V, vec![a("callbacks", T_A)]),
-            m("deactivate", zh!(native_deactivate), PRO, T_V, vec![a("callback", T_DCB)]),
-            m("dispatch", zh!(native_dispatch), PRO, T_V, vec![a("blocking", T_B)]),
-            m("now", zh!(native_now), PRO, T_F, vec![]),
-        ]
-    };
-    let ad = ces.abstract_driver;
-    let pr = k::PRIVATE;
-
-    let mut ss = hooks();
-    ss.extend(vec![
-        m("onSignal", zh!(on_signal), PUB, T_S, vec![a("signal", T_I), a("closure", T_CL)]),
+    let ms = vec![
+        m("__construct", zh!(construct), PUB, NONE, vec![]),
+        m("__destruct", zh!(destruct), PUB, NONE, vec![]),
+        m("activate", zh!(native_activate), PRO, T_V, vec![a("callbacks", T_A)]),
+        m("deactivate", zh!(native_deactivate), PRO, T_V, vec![a("callback", T_DCB)]),
+        m("dispatch", zh!(native_dispatch), PRO, T_V, vec![a("blocking", T_B)]),
+        m("now", zh!(native_now), PRO, T_F, vec![]),
         m("getHandle", zh!(get_handle), PUB, T_MIX, vec![]),
-        m("selectStreams", zh!(private_noop), PRI, T_V, vec![a("read", T_A), a("write", T_A), a("timeout", T_F)]),
-        m("getTimeout", zh!(private_float), PRI, T_F, vec![]),
-        m("handleSignal", zh!(private_noop), PRI, T_V, vec![a("signal", T_I)]),
-    ]);
-    ces.stream_select = k::register_class("Revolt\\EventLoop\\Driver\\StreamSelectDriver", ss, ad, k::FINAL);
-    let s = ces.stream_select;
-    for n in ["readStreams", "readCallbacks", "writeStreams", "writeCallbacks", "signalCallbacks"] {
-        k::prop(s, n, T_A, pr, Dv::EmptyArray);
-    }
-    k::prop(s, "timerQueue", c("Revolt\\EventLoop\\Internal\\TimerQueue", false), pr | k::READONLY, Dv::Undef);
-    k::prop(s, "signalQueue", c("SplQueue", false), pr | k::READONLY, Dv::Undef);
-    k::prop(s, "signalHandling", T_B, pr, Dv::Undef);
-    k::prop(s, "streamSelectErrorHandler", T_CL, pr | k::READONLY, Dv::Undef);
-    k::prop(s, "streamSelectIgnoreResult", T_B, pr, Dv::Bool(false));
-
-    for (name, handle, supported) in [
-        ("Revolt\\EventLoop\\Driver\\EvDriver", "EvLoop", zh!(is_supported_ev)),
-        ("Revolt\\EventLoop\\Driver\\EventDriver", "EventBase", zh!(is_supported_event)),
-    ] {
-        let mut ms = hooks();
-        ms.extend(vec![
-            m("isSupported", supported, PUB | STA, T_B, vec![]),
-            m("cancel", zh!(cancel), PUB, T_V, vec![a("callbackId", T_S)]),
-            m("run", zh!(run), PUB, T_V, vec![]),
-            m("stop", zh!(stop), PUB, T_V, vec![]),
-            m("getHandle", zh!(get_handle), PUB, c(handle, false), vec![]),
-        ]);
-        let cls = k::register_class(name, ms, ad, k::FINAL);
-        k::prop(cls, "activeSignals", crate::zend::class::t(k::T_ARRAY | k::T_NULL), pr | k::STATIC, Dv::Null);
-        k::prop(cls, "handle", c(handle, false), pr, Dv::Undef);
-        k::prop(cls, "events", T_A, pr, Dv::EmptyArray);
-        k::prop(cls, "ioCallback", T_CL, pr | k::READONLY, Dv::Undef);
-        k::prop(cls, "timerCallback", T_CL, pr | k::READONLY, Dv::Undef);
-        k::prop(cls, "signalCallback", T_CL, pr | k::READONLY, Dv::Undef);
-        k::prop(cls, "signals", T_A, pr, Dv::EmptyArray);
-        if handle == "EvLoop" {
-            ces.ev = cls;
-        } else {
-            ces.event = cls;
-        }
-    }
-
-    let mut uv = hooks();
-    uv.extend(vec![
-        m("isSupported", zh!(is_supported_uv), PUB | STA, T_B, vec![]),
-        m("cancel", zh!(cancel), PUB, T_V, vec![a("callbackId", T_S)]),
-        m("getHandle", zh!(get_handle), PUB, T_MIX, vec![]),
-        m("getStreamCallbackFlags", zh!(private_int), PRI, T_I, vec![a("callback", c("Revolt\\EventLoop\\Internal\\StreamCallback", false))]),
-    ]);
-    ces.uv = k::register_class("Revolt\\EventLoop\\Driver\\UvDriver", uv, ad, k::FINAL);
-    let u = ces.uv;
-    k::prop(u, "handle", NONE, pr, Dv::Null);
-    for n in ["events", "uvCallbacks", "streams"] {
-        k::prop(u, n, T_A, pr, Dv::EmptyArray);
-    }
-    for n in ["ioCallback", "timerCallback", "signalCallback"] {
-        k::prop(u, n, T_CL, pr | k::READONLY, Dv::Undef);
-    }
-
-    for cls in [ces.stream_select, ces.ev, ces.event, ces.uv] {
-        (*cls).__bindgen_anon_2.create_object = Some(create_object);
-    }
-    run::minit(ad);
+    ];
+    ces.native = k::register_class("Revolt\\EventLoop\\Driver\\NativeDriver", ms, ces.abstract_driver, k::FINAL);
+    (*ces.native).__bindgen_anon_2.create_object = Some(create_object);
+    run::minit(ces.abstract_driver);
 }

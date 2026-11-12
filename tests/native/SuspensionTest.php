@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace RevoltRs\Tests;
 
 use PHPUnit\Framework\TestCase;
-use Revolt\EventLoop\Driver\StreamSelectDriver;
 use Revolt\EventLoop\Internal\AbstractDriver;
 use Revolt\EventLoop\Internal\DriverCallback;
 use Revolt\EventLoop\UncaughtThrowable;
@@ -20,7 +19,7 @@ final class SuspensionTest extends TestCase
      */
     public function testResumeOfDestroyedFiberIsIgnored(): void
     {
-        $driver = new StreamSelectDriver();
+        $driver = Drivers::create();
         $suspension = null;
         $finally = false;
         $fiber = new \Fiber(static function () use (&$suspension, &$finally, $driver): void {
@@ -90,7 +89,7 @@ final class SuspensionTest extends TestCase
     public function testUncaughtFromResumedFiberNamesResume(): void
     {
         self::nativeOnly();
-        $driver = new StreamSelectDriver();
+        $driver = Drivers::create();
         $suspension = null;
         $fiber = new \Fiber(static function () use (&$suspension, $driver): void {
             $suspension = $driver->getSuspension();

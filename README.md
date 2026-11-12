@@ -7,8 +7,8 @@ faster.
 
 - **Same API:** Reflection-identical to revolt/event-loop; its own test suite passes
   unchanged. Every difference is listed, with the test that pins it, in
-  [DIVERGENCES.md](DIVERGENCES.md) (notably: `EventLoop::setDriver()` throws, the loop always
-  runs on its native driver).
+  [DIVERGENCES.md](DIVERGENCES.md) (notably: one driver class, `Driver\NativeDriver`, instead of
+  the four of the PHP library; `EventLoop::setDriver()` throws, the loop always runs on it).
 - **Native reactor:** epoll (Linux), kqueue (macOS), WSAPoll (Windows); no `stream_select()`
   limits, no ext-ev/event/uv needed, signals without ext-pcntl, precise timers.
 - **Embeddable:** other Rust extensions can drive the same loop directly from Rust, see

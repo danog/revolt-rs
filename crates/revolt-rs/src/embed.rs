@@ -99,7 +99,7 @@ pub struct Abi {
 unsafe impl Sync for Abi {}
 
 unsafe extern "C" fn abi_current() -> *mut sys::zend_object {
-    // always a native driver of a built-in class (setDriver() is refused)
+    // always a NativeDriver (setDriver() is refused)
     classes::eventloop::driver()
 }
 

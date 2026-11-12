@@ -1,5 +1,6 @@
 //! The PHP classes of revolt/event-loop 1.0.9, registered with the same names, modifiers,
-//! signatures, properties and constants (checked by tools/dump-api.php), and their behaviour.
+//! signatures, properties and constants (checked by tools/dump-api.php), and their behaviour;
+//! instead of its four driver classes, one: Driver\NativeDriver (DIVERGENCES.md).
 
 pub mod callbacks;
 pub mod driver;
@@ -28,10 +29,7 @@ pub struct Ces {
     pub uncaught_throwable: *mut sys::zend_class_entry,
     pub unsupported_feature: *mut sys::zend_class_entry,
     pub abstract_driver: *mut sys::zend_class_entry,
-    pub stream_select: *mut sys::zend_class_entry,
-    pub ev: *mut sys::zend_class_entry,
-    pub event: *mut sys::zend_class_entry,
-    pub uv: *mut sys::zend_class_entry,
+    pub native: *mut sys::zend_class_entry,
     pub tracing: *mut sys::zend_class_entry,
     pub closure_helper: *mut sys::zend_class_entry,
     pub driver_callback: *mut sys::zend_class_entry,
@@ -56,10 +54,7 @@ static mut CE: Ces = Ces {
     uncaught_throwable: null_mut(),
     unsupported_feature: null_mut(),
     abstract_driver: null_mut(),
-    stream_select: null_mut(),
-    ev: null_mut(),
-    event: null_mut(),
-    uv: null_mut(),
+    native: null_mut(),
     tracing: null_mut(),
     closure_helper: null_mut(),
     driver_callback: null_mut(),

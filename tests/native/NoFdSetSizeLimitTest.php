@@ -5,10 +5,9 @@ declare(strict_types=1);
 namespace RevoltRs\Tests;
 
 use PHPUnit\Framework\TestCase;
-use Revolt\EventLoop\Driver\StreamSelectDriver;
 
 /**
- * DIVERGENCES.md "No FD_SETSIZE limit": StreamSelectDriver watches more than 1024 descriptors
+ * DIVERGENCES.md "No FD_SETSIZE limit": NativeDriver watches more than 1024 descriptors
  * (revolt/event-loop throws "You have reached the limits of stream_select()").
  */
 final class NoFdSetSizeLimitTest extends TestCase
@@ -21,7 +20,7 @@ final class NoFdSetSizeLimitTest extends TestCase
         if (\DIRECTORY_SEPARATOR === '\\') {
             self::markTestSkipped('socket pairs of this size are a Unix test');
         }
-        $loop = new StreamSelectDriver();
+        $loop = Drivers::create();
         $sockets = [];
         for ($i = 0; $i < 1001; $i++) {
             $sockets[] = \stream_socket_pair(\STREAM_PF_UNIX, \STREAM_SOCK_STREAM, \STREAM_IPPROTO_IP);

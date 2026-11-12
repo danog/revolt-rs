@@ -9,7 +9,7 @@ workflow's timer step measured `usleep()` overshooting by +14 to +73 ms (`usleep
 `usleep(0.10)` +72.5 ms, `usleep(0.50)` +13.9 ms; with `taskpolicy -a` +41.1, +33.1, +52.7 ms:
 no better). The tests below `usleep(500000)` inside a callback and allow 100 ms in all, so they
 fail on those runners with the PHP library too (run 43042104542: up to 1.737 s for a 1.6 s bound,
-1.153 s for 1.1 s; StreamSelectDriver and TracingDriver, extension and library).
+1.153 s for 1.1 s; StreamSelectDriver and TracingDriver, extension and library; the same tests run as NativeDriverTest and NativeTracingDriverTest now).
 
 <!-- the list: one test per line, `- \`[Class]::method\`: reason` (read by tools/test.sh) -->
 

@@ -190,10 +190,8 @@ pub enum Phase {
 /// The class a driver object is of.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum DriverKind {
-    StreamSelect,
-    Ev,
-    Event,
-    Uv,
+    /// Driver\NativeDriver
+    Native,
     /// a PHP class extending AbstractDriver
     User,
 }
@@ -253,8 +251,6 @@ pub struct Core {
     pub error_stash: Option<(Zv, Zv, Desc)>,
     /// native callbacks released after their invocation (cancelled while running)
     pub deferred_release: Vec<Cb>,
-    /// getHandle()'s value (EvLoop, EventBase, uv loop), created on first use
-    pub handle: Zv,
     pub reactor: backend::Reactor,
     pub timers: timer::Heap,
 }
@@ -291,7 +287,6 @@ impl Core {
             main_suspension: null_mut(),
             error_stash: None,
             deferred_release: Vec::new(),
-            handle: Zv::undef(),
             reactor: backend::Reactor::new(),
             timers: timer::Heap::default(),
         }
@@ -345,7 +340,6 @@ impl Core {
             add(&mut *e.0);
         }
         add(&mut *self.callback_fiber.0);
-        add(&mut *self.handle.0);
     }
 
     /// A new record with the next id.

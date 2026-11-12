@@ -23,8 +23,8 @@ pub fn current() -> *mut sys::zend_object {
     DRIVER.with(|c| c.get())
 }
 
-/// EventLoop::getDriver() (borrowed), or null with an exception. Always a native driver of one
-/// of the four built-in classes: setDriver() is refused, so this is the loop's only driver.
+/// EventLoop::getDriver() (borrowed), or null with an exception. Always a NativeDriver:
+/// setDriver() is refused, so this is the loop's only driver.
 #[inline(always)]
 pub fn driver() -> *mut sys::zend_object {
     let d = current();

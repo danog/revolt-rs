@@ -5,22 +5,10 @@ declare(strict_types=1);
 namespace RevoltRs\Tests;
 
 use PHPUnit\Framework\TestCase;
-use Revolt\EventLoop\Driver;
-use Revolt\EventLoop\Driver\EvDriver;
-use Revolt\EventLoop\Driver\EventDriver;
-use Revolt\EventLoop\Driver\StreamSelectDriver;
-use Revolt\EventLoop\Driver\UvDriver;
 
 final class StreamTest extends TestCase
 {
     use NativeOnly;
-
-    public static function drivers(): iterable
-    {
-        foreach ([StreamSelectDriver::class, EvDriver::class, EventDriver::class, UvDriver::class] as $class) {
-            yield $class => [$class];
-        }
-    }
 
     private static function pair(): array
     {
@@ -29,21 +17,13 @@ final class StreamTest extends TestCase
     }
 
     /**
-     * DIVERGENCES.md "Data in PHP's stream read buffer": every driver class reports a stream
-     * readable while PHP's buffer holds data, though the socket itself is drained.
-     *
-     * @dataProvider drivers
+     * DIVERGENCES.md "Data in PHP's stream read buffer": a stream is readable while PHP's buffer
+     * holds data, though the socket itself is drained (as with the library's StreamSelectDriver;
+     * its other drivers do not look at the buffer).
      */
-    public function testBufferedDataIsReadable(string $class): void
+    public function testBufferedDataIsReadable(): void
     {
-        if ($class !== StreamSelectDriver::class) {
-            self::nativeOnly();
-        }
-        if (\method_exists($class, 'isSupported') && !$class::isSupported()) {
-            self::markTestSkipped($class . ' is not supported');
-        }
-        /** @var Driver $driver */
-        $driver = new $class();
+        $driver = Drivers::create();
         [$a, $b] = self::pair();
         \fwrite($b, "one\ntwo\n");
         \usleep(10000);
@@ -66,7 +46,7 @@ final class StreamTest extends TestCase
     public function testClosedStreamIsTypeError(): void
     {
         self::nativeOnly();
-        $driver = new StreamSelectDriver();
+        $driver = Drivers::create();
         [$a, $b] = self::pair();
         $driver->onReadable($a, static function (): void {});
         \fclose($a);

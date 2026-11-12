@@ -5,12 +5,24 @@ The tests listed here are excluded by `tools/test.sh` (and CI), each with the re
 of them stands for a deliberate difference documented in `DIVERGENCES.md` and pinned by a test
 of our own in `tests/native`.
 
-<!-- the list: one test per line, `- \`Class::method\`: reason` (read by tools/test.sh) -->
+<!-- the list: one test per line, `- \`Class::method\`: reason` (read by tools/test.sh); `Class::*`: all of a class's tests -->
 
-- `Revolt\EventLoop\Driver\StreamSelectDriverTest::testTooLargeFileDescriptorSet`: expects the
-  FD_SETSIZE error of stream_select() with 2002 descriptors; the native reactor (epoll/kqueue/
-  WSAPoll) has no such limit, so nothing is thrown and the test's never-readable watchers keep
-  the loop running forever. Pinned by `tests/native/NoFdSetSizeLimitTest.php`.
+- `Revolt\EventLoop\Driver\StreamSelectDriverTest::*`: revolt-rs has no StreamSelectDriver, only
+  NativeDriver (DIVERGENCES.md "One driver class"). These tests (DriverTest's and
+  StreamSelectDriverTest's own) run against NativeDriver as `RevoltRs\Tests\NativeDriverTest`,
+  a subclass of this test changing only the driver it makes.
+- `Revolt\EventLoop\Driver\EvDriverTest::*`: no EvDriver (DIVERGENCES.md "One driver class");
+  DriverTest runs against NativeDriver (`NativeDriverTest`); its own tests (an `\EvLoop` handle,
+  `isSupported()`) have no counterpart: NativeDriver has no handle (`getHandle()` is null, pinned
+  by `NativeDriverTest::testOnlyNativeDriver`).
+- `Revolt\EventLoop\Driver\EventDriverTest::*`: as `EvDriverTest` (an `\EventBase` handle).
+- `Revolt\EventLoop\Driver\UvDriverTest::*`: as `EvDriverTest` (a uv loop handle).
+- `Revolt\EventLoop\Driver\TracingDriverTest::*`: wraps a StreamSelectDriver, which revolt-rs
+  does not have; runs wrapping NativeDriver as `RevoltRs\Tests\NativeTracingDriverTest`.
+- `RevoltRs\Tests\NativeDriverTest::testTooLargeFileDescriptorSet` (StreamSelectDriverTest's):
+  expects the FD_SETSIZE error of stream_select() with 2002 descriptors; the native reactor
+  (epoll/kqueue/WSAPoll) has no such limit, so nothing is thrown and the test's never-readable
+  watchers keep the loop running forever. Pinned by `tests/native/NoFdSetSizeLimitTest.php`.
 - `event_loop_destruction_order_stream_select.phpt`: starts with `EventLoop::setDriver()`, which
   revolt-rs refuses (the loop always runs on its native driver, DIVERGENCES.md). The same check
   on the loop's own driver: `tests/native/destruction_order.phpt`; the refusal is pinned by

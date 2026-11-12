@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace RevoltRs\Tests;
 
 use PHPUnit\Framework\TestCase;
-use Revolt\EventLoop\Driver\StreamSelectDriver;
 use Revolt\EventLoop\UnsupportedFeatureException;
 
 /**
@@ -32,10 +31,10 @@ final class SignalTest extends TestCase
         }
         $this->expectException(UnsupportedFeatureException::class);
         $this->expectExceptionMessage('Signal handling requires the pcntl extension');
-        (new StreamSelectDriver())->onSignal(2, static function (): void {});
+        (Drivers::create())->onSignal(2, static function (): void {});
     }
 
-    /** StreamSelectDriver handles signals whether ext-pcntl is loaded or not. */
+    /** NativeDriver handles signals whether ext-pcntl is loaded or not. */
     public function testSignalWithoutPcntlDependency(): void
     {
         if (\DIRECTORY_SEPARATOR === '\\') {
@@ -46,7 +45,7 @@ final class SignalTest extends TestCase
             self::nativeOnly();
         }
         $sigusr2 = \defined('SIGUSR2') ? \SIGUSR2 : 31;
-        $driver = new StreamSelectDriver();
+        $driver = Drivers::create();
         $got = [];
         $driver->onSignal($sigusr2, static function (string $id, int $signal) use (&$got, $driver): void {
             $got[] = $signal;
@@ -67,7 +66,7 @@ final class SignalTest extends TestCase
         $hits = [];
         \pcntl_signal(\SIGUSR1, static function () use (&$hits): void { $hits[] = 'pcntl'; });
         try {
-            $driver = new StreamSelectDriver();
+            $driver = Drivers::create();
             $driver->onSignal(\SIGUSR1, static function (string $id) use (&$hits, $driver): void {
                 $hits[] = 'loop';
                 $driver->cancel($id);

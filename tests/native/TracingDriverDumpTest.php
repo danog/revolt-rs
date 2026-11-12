@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace RevoltRs\Tests;
 
 use PHPUnit\Framework\TestCase;
-use Revolt\EventLoop\Driver\StreamSelectDriver;
 use Revolt\EventLoop\Driver\TracingDriver;
 use Revolt\EventLoop\UncaughtThrowable;
 
@@ -15,7 +14,7 @@ final class TracingDriverDumpTest extends TestCase
 
     public function testDump(): void
     {
-        $driver = new TracingDriver(new StreamSelectDriver());
+        $driver = new TracingDriver(Drivers::create());
         $id = $driver->delay(1, static function (): void {});
         $unreferenced = $driver->unreference($driver->delay(1, static function (): void {}));
         $dump = $driver->dump();
@@ -33,7 +32,7 @@ final class TracingDriverDumpTest extends TestCase
     public function testWrapperClosureName(): void
     {
         self::nativeOnly();
-        $driver = new TracingDriver(new StreamSelectDriver());
+        $driver = new TracingDriver(Drivers::create());
         $driver->defer(static function (): void {
             throw new \RuntimeException('boom');
         });

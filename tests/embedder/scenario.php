@@ -6,6 +6,7 @@
 declare(strict_types=1);
 
 use Revolt\EventLoop;
+use Revolt\EventLoop\Driver\NativeDriver;
 use Revolt\EventLoop\Driver\StreamSelectDriver;
 
 if (getenv('REVOLT_EMBED_SCENARIO_PHPLIB')) {
@@ -177,7 +178,7 @@ $out['identifiers_after_uncaught'] = EventLoop::getIdentifiers();
 // the loop's driver cannot be replaced (the PHP library's can)
 $driver = EventLoop::getDriver();
 try {
-    EventLoop::setDriver(new StreamSelectDriver());
+    EventLoop::setDriver(class_exists(NativeDriver::class) ? new NativeDriver() : new StreamSelectDriver());
     $out['set_driver'] = 'not thrown';
 } catch (EventLoop\UnsupportedFeatureException|\Error $e) {
     $out['set_driver'] = $e->getMessage();

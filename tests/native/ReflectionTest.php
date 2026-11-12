@@ -6,7 +6,8 @@ namespace RevoltRs\Tests;
 
 use PHPUnit\Framework\TestCase;
 use Revolt\EventLoop;
-use Revolt\EventLoop\Driver\StreamSelectDriver;
+use Revolt\EventLoop\Driver\NativeDriver;
+use Revolt\EventLoop\Internal\DriverSuspension;
 use Revolt\EventLoop\Internal\AbstractDriver;
 
 /** DIVERGENCES.md "Reflection". */
@@ -17,7 +18,7 @@ final class ReflectionTest extends TestCase
     public function testClassesAreInternal(): void
     {
         self::nativeOnly();
-        $class = new \ReflectionClass(StreamSelectDriver::class);
+        $class = new \ReflectionClass(NativeDriver::class);
         self::assertTrue($class->isInternal());
         self::assertFalse($class->getFileName());
         self::assertFalse($class->getDocComment());
@@ -30,18 +31,19 @@ final class ReflectionTest extends TestCase
     public function testPrivateStateStaysAtDefaults(): void
     {
         self::nativeOnly();
-        $driver = new StreamSelectDriver();
-        [$read] = \stream_socket_pair(\DIRECTORY_SEPARATOR === '\\' ? \STREAM_PF_INET : \STREAM_PF_UNIX, \STREAM_SOCK_STREAM, \STREAM_IPPROTO_IP);
-        $id = $driver->onReadable($read, static function (): void {});
-        $property = new \ReflectionProperty(StreamSelectDriver::class, 'readStreams');
+        $driver = new NativeDriver();
+        $id = $driver->defer(static function (): void {});
+        $property = new \ReflectionProperty(AbstractDriver::class, 'callbacks');
         self::assertSame([], $property->getValue($driver));
+        $suspension = $driver->getSuspension();
+        self::assertFalse((new \ReflectionProperty(DriverSuspension::class, 'pending'))->getValue($suspension));
         $driver->cancel($id);
     }
 
     public function testPrivateMethodsDoNothing(): void
     {
         self::nativeOnly();
-        $driver = new StreamSelectDriver();
+        $driver = new NativeDriver();
         $ran = false;
         $driver->defer(static function () use (&$ran): void { $ran = true; });
         $isEmpty = new \ReflectionMethod(AbstractDriver::class, 'isEmpty');

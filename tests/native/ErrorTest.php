@@ -5,14 +5,13 @@ declare(strict_types=1);
 namespace RevoltRs\Tests;
 
 use PHPUnit\Framework\TestCase;
-use Revolt\EventLoop\Driver\StreamSelectDriver;
 use Revolt\EventLoop\UncaughtThrowable;
 
 final class ErrorTest extends TestCase
 {
     public function testExceptionFromErrorHandler(): void
     {
-        $driver = new StreamSelectDriver();
+        $driver = Drivers::create();
         $driver->setErrorHandler(static function (\Throwable $e): void {
             throw new \LogicException('from handler', 0, $e);
         });
@@ -34,7 +33,7 @@ final class ErrorTest extends TestCase
 
     public function testNestedRun(): void
     {
-        $driver = new StreamSelectDriver();
+        $driver = Drivers::create();
         $driver->defer(static function () use ($driver): void { $driver->run(); });
         try {
             $driver->run();
@@ -47,7 +46,7 @@ final class ErrorTest extends TestCase
 
     public function testNestedRunInFiber(): void
     {
-        $driver = new StreamSelectDriver();
+        $driver = Drivers::create();
         $fiber = new \Fiber(static function () use ($driver): void { $driver->run(); });
         $driver->defer(static function () use ($fiber): void { $fiber->start(); });
         try {
@@ -60,7 +59,7 @@ final class ErrorTest extends TestCase
 
     public function testRunFromFiberIsRefused(): void
     {
-        $driver = new StreamSelectDriver();
+        $driver = Drivers::create();
         $fiber = new \Fiber(static function () use ($driver): void { $driver->run(); });
         $this->expectException(\Error::class);
         $fiber->start();

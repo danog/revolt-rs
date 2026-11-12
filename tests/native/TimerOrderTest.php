@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace RevoltRs\Tests;
 
 use PHPUnit\Framework\TestCase;
-use Revolt\EventLoop\Driver\StreamSelectDriver;
 
 /** DIVERGENCES.md "Equal timer expirations": they fire in creation order. */
 final class TimerOrderTest extends TestCase
@@ -15,7 +14,7 @@ final class TimerOrderTest extends TestCase
     public function testEqualExpirationsFireInCreationOrder(): void
     {
         self::nativeOnly();
-        $driver = new StreamSelectDriver();
+        $driver = Drivers::create();
         $order = [];
         // one now() for all: create them inside a single callback, with the same delay
         $driver->defer(static function () use ($driver, &$order): void {

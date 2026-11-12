@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace RevoltRs\Tests;
 
 use PHPUnit\Framework\TestCase;
-use Revolt\EventLoop\Driver\StreamSelectDriver;
 
 /** A forked child keeps using its copy of the loop (the native poller is rebuilt there). */
 final class ForkTest extends TestCase
@@ -15,7 +14,7 @@ final class ForkTest extends TestCase
         if (!\function_exists('pcntl_fork')) {
             self::markTestSkipped('needs pcntl_fork()');
         }
-        $driver = new StreamSelectDriver();
+        $driver = Drivers::create();
         [$a, $b] = \stream_socket_pair(\STREAM_PF_UNIX, \STREAM_SOCK_STREAM, \STREAM_IPPROTO_IP);
         [$c, $d] = \stream_socket_pair(\STREAM_PF_UNIX, \STREAM_SOCK_STREAM, \STREAM_IPPROTO_IP);
         // the parent's poller exists and watches $c before the fork
@@ -52,7 +51,7 @@ final class ForkTest extends TestCase
         if (!\function_exists('pcntl_fork')) {
             self::markTestSkipped('needs pcntl_fork()');
         }
-        $driver = new StreamSelectDriver();
+        $driver = Drivers::create();
         [$a, $b] = \stream_socket_pair(\STREAM_PF_UNIX, \STREAM_SOCK_STREAM, \STREAM_IPPROTO_IP);
         // the parent's poller and wait timer exist before the fork
         $watch = $driver->onReadable($a, static function (): void {});

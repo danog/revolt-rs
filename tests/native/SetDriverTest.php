@@ -6,7 +6,7 @@ namespace RevoltRs\Tests;
 
 use PHPUnit\Framework\TestCase;
 use Revolt\EventLoop;
-use Revolt\EventLoop\Driver\StreamSelectDriver;
+use Revolt\EventLoop\Driver\NativeDriver;
 use Revolt\EventLoop\Driver\TracingDriver;
 use Revolt\EventLoop\DriverFactory;
 use Revolt\EventLoop\UnsupportedFeatureException;
@@ -28,8 +28,8 @@ final class SetDriverTest extends TestCase
     {
         self::nativeOnly();
         $driver = EventLoop::getDriver();
-        $inner = new StreamSelectDriver();
-        foreach ([new StreamSelectDriver(), new TracingDriver($inner)] as $other) {
+        $inner = new NativeDriver();
+        foreach ([new NativeDriver(), new TracingDriver($inner)] as $other) {
             try {
                 EventLoop::setDriver($other);
                 self::fail('setDriver() did not throw');
@@ -48,7 +48,7 @@ final class SetDriverTest extends TestCase
     {
         self::nativeOnly();
         $driver = EventLoop::getDriver();
-        $other = new TracingDriver(new StreamSelectDriver());
+        $other = new TracingDriver(new NativeDriver());
         (new \ReflectionProperty(EventLoop::class, 'driver'))->setValue(null, $other);
         self::assertSame($driver, EventLoop::getDriver());
         $ran = false;
@@ -58,8 +58,9 @@ final class SetDriverTest extends TestCase
     }
 
     /**
-     * REVOLT_DRIVER naming no built-in driver class and REVOLT_DRIVER_DEBUG_TRACE: the loop
-     * ignores them (DriverFactory::create() still honours them).
+     * REVOLT_DRIVER selects nothing (revolt-rs has one driver class, DIVERGENCES.md "One driver
+     * class"); REVOLT_DRIVER_DEBUG_TRACE: the loop ignores it (DriverFactory::create() still
+     * honours it).
      */
     public function testLoopDriverIgnoresOtherDriverSettings(): void
     {
@@ -67,28 +68,25 @@ final class SetDriverTest extends TestCase
         \putenv('REVOLT_DRIVER=NoSuchDriver');
         \putenv('REVOLT_DRIVER_DEBUG_TRACE=1');
         try {
-            self::assertNotInstanceOf(TracingDriver::class, EventLoop::getDriver());
-            try {
-                (new DriverFactory())->create();
-                self::fail('the factory did not throw');
-            } catch (\Error $e) {
-                self::assertSame("Driver 'NoSuchDriver' does not exist.", $e->getMessage());
-            }
-            \putenv('REVOLT_DRIVER');
-            self::assertInstanceOf(TracingDriver::class, (new DriverFactory())->create());
+            self::assertInstanceOf(NativeDriver::class, EventLoop::getDriver());
+            $traced = (new DriverFactory())->create();
+            self::assertInstanceOf(TracingDriver::class, $traced);
+            \putenv('REVOLT_DRIVER_DEBUG_TRACE');
+            self::assertInstanceOf(NativeDriver::class, (new DriverFactory())->create());
         } finally {
             \putenv('REVOLT_DRIVER');
             \putenv('REVOLT_DRIVER_DEBUG_TRACE');
         }
     }
 
-    /** REVOLT_DRIVER naming a built-in class picks it. */
-    public function testLoopDriverHonoursBuiltinClasses(): void
+    /** REVOLT_DRIVER naming one of revolt/event-loop's driver classes selects nothing either. */
+    public function testLoopDriverIgnoresDriverClassNames(): void
     {
         self::nativeOnly();
-        \putenv('REVOLT_DRIVER=' . StreamSelectDriver::class);
+        \putenv('REVOLT_DRIVER=Revolt\EventLoop\Driver\EvDriver');
         try {
-            self::assertInstanceOf(StreamSelectDriver::class, EventLoop::getDriver());
+            self::assertInstanceOf(NativeDriver::class, EventLoop::getDriver());
+            self::assertInstanceOf(NativeDriver::class, (new DriverFactory())->create());
         } finally {
             \putenv('REVOLT_DRIVER');
         }

@@ -6,7 +6,6 @@ namespace RevoltRs\Tests;
 
 use PHPUnit\Framework\TestCase;
 use Revolt\EventLoop;
-use Revolt\EventLoop\Driver\StreamSelectDriver;
 
 /** Cycles through the native objects are collected. */
 final class GcTest extends TestCase
@@ -15,7 +14,7 @@ final class GcTest extends TestCase
     {
         $refs = [];
         for ($i = 0; $i < 50; $i++) {
-            $driver = new StreamSelectDriver();
+            $driver = Drivers::create();
             $driver->defer(static function () use ($driver): void {});
             $driver->delay(1, static function () use ($driver): void {});
             $driver->onReadable(\STDIN, static function () use ($driver): void {});
@@ -31,7 +30,7 @@ final class GcTest extends TestCase
 
     public function testSuspendedFiberInCycle(): void
     {
-        $driver = new StreamSelectDriver();
+        $driver = Drivers::create();
         $fiber = new \Fiber(static function () use ($driver): void {
             $driver->getSuspension()->suspend();
         });
@@ -46,7 +45,7 @@ final class GcTest extends TestCase
 
     public function testQueuedArgumentsCycle(): void
     {
-        $driver = new StreamSelectDriver();
+        $driver = Drivers::create();
         $object = new \stdClass();
         $object->driver = $driver;
         $driver->queue(static function (\stdClass $o): void {}, $object);

@@ -9,6 +9,10 @@
 //                                                                        (tools/phplib, composer install)
 //   php tools/dump-api.php diff a.json b.json                           exit 1 on differences
 //
+// The one expected difference (DIVERGENCES.md): revolt-rs has Driver\NativeDriver instead of the
+// library's four driver classes. `diff <library> <extension>` reports it without failing (and
+// fails if it is not exactly that: a driver class still there, or NativeDriver missing).
+//
 // Not dumped (they cannot match an internal implementation): file names and lines, doc comments,
 // isInternal()/isUserDefined(), attributes (#[\Override]), ReflectionParameter::isPromoted().
 // Default values are compared through var_export(), so `null` and `null` constants agree.
@@ -17,6 +21,22 @@ if (($argv[1] ?? '') === 'diff') {
     $a = json_decode(file_get_contents($argv[2]), true);
     $b = json_decode(file_get_contents($argv[3]), true);
     $diff = [];
+    $expected = [];
+    $removed = ['StreamSelectDriver', 'EvDriver', 'EventDriver', 'UvDriver'];
+    if (isset($a['classes']['Revolt\\EventLoop\\Driver\\StreamSelectDriver'])) {
+        foreach ($removed as $r) {
+            $name = "Revolt\\EventLoop\\Driver\\$r";
+            if (isset($a['classes'][$name]) && !isset($b['classes'][$name])) {
+                unset($a['classes'][$name]);
+                $expected[] = "- /classes/$name (expected: no such class in revolt-rs)";
+            }
+        }
+        $native = 'Revolt\\EventLoop\\Driver\\NativeDriver';
+        if (isset($b['classes'][$native]) && !isset($a['classes'][$native])) {
+            unset($b['classes'][$native]);
+            $expected[] = "+ /classes/$native (expected: revolt-rs's one driver class)";
+        }
+    }
     $walk = static function ($x, $y, string $path) use (&$walk, &$diff): void {
         if (is_array($x) && is_array($y)) {
             foreach (array_unique(array_merge(array_keys($x), array_keys($y))) as $k) {
@@ -43,10 +63,13 @@ if (($argv[1] ?? '') === 'diff') {
         }
     };
     $walk($a, $b, '');
+    foreach ($expected as $d) {
+        echo $d, "\n";
+    }
     foreach ($diff as $d) {
         echo $d, "\n";
     }
-    echo count($diff) === 0 ? "API surfaces are identical\n" : count($diff) . " difference(s)\n";
+    echo count($diff) === 0 ? "API surfaces are identical" . ($expected === [] ? "" : " (but for the expected difference)") . "\n" : count($diff) . " difference(s)\n";
     exit(count($diff) === 0 ? 0 : 1);
 }
 

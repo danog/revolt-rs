@@ -60,8 +60,8 @@ config.m4, Makefile.frag phpize/PIE build (cargo build)
 | `Revolt\EventLoop\InvalidCallbackError` | final, extends Error | consts E_NONNULL_RETURN=1, E_INVALID_IDENTIFIER=2, private ctor |
 | `Revolt\EventLoop\UncaughtThrowable` | final, extends Error | private ctor, two factories |
 | `Revolt\EventLoop\UnsupportedFeatureException` | final, extends Exception | |
-| `Revolt\EventLoop\Driver\StreamSelectDriver` | final, extends AbstractDriver | |
-| `Revolt\EventLoop\Driver\EvDriver` / `EventDriver` / `UvDriver` | final, extend AbstractDriver | `static isSupported()` |
+| `Revolt\EventLoop\Driver\StreamSelectDriver` | final, extends AbstractDriver | **not in revolt-rs**: replaced by `Driver\NativeDriver` |
+| `Revolt\EventLoop\Driver\EvDriver` / `EventDriver` / `UvDriver` | final, extend AbstractDriver | **not in revolt-rs** (see above) |
 | `Revolt\EventLoop\Driver\TracingDriver` | final, implements Driver | wraps a Driver, `dump()` |
 | `Revolt\EventLoop\Internal\AbstractDriver` | abstract, implements Driver | **extensible**: abstract activate/dispatch/deactivate/now/getHandle, final protected enqueueCallback/error, final __serialize/__unserialize |
 | `Revolt\EventLoop\Internal\DriverCallback` | abstract | public props invokable/enabled/referenced, readonly id/closure, __get/__set throw |
@@ -78,16 +78,14 @@ file names/lines/doc comments, `isInternal()`, attributes (`#[\Override]`), `isP
 
 ## Architecture
 
-### One native core, many class names
+### One native core, one driver class
 
 All drivers derive from the native `AbstractDriver`, whose object carries a Rust `Core`
 (callbacks, enable queues, the callback queue, microtasks, the error handler, the interrupt,
-the callback fiber, the suspension map). `StreamSelectDriver`, `EvDriver`, `EventDriver`
-and `UvDriver` are the same native driver over the native reactor (epoll/kqueue/WSAPoll);
-their class names keep `isSupported()` (extension_loaded of ev/event/uv; StreamSelect: always),
-`getHandle()` (null / a fresh `\EvLoop` / `\EventBase` / uv loop, created lazily and not driven
-by the native loop — documented) and `DriverFactory`'s choice order. They differ in nothing
-else, so `REVOLT_DRIVER`, `DriverFactory` and tests that instantiate a specific class work.
+the callback fiber, the suspension map). The library's four driver classes are replaced by one,
+`Driver\NativeDriver`, over the native reactor (epoll/kqueue/WSAPoll); `getHandle()` is null,
+`REVOLT_DRIVER` is ignored, `DriverFactory::create()` and the loop make a NativeDriver
+(DIVERGENCES.md).
 
 ### Callback records
 

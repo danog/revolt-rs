@@ -9,8 +9,9 @@ An extension written in Rust (a database driver, say) can embed revolt-rs as a l
 - the extension's own sockets can live in the loop's poller as *sources*: registered
   edge-triggered once, their readiness handed to the extension in one batch per poll (no Revolt
   callback per socket, no second poller);
-- the loop's driver is always native: `EventLoop::setDriver()` is refused (DIVERGENCES.md), so
-  PHP code and every embedder share that one loop;
+- the loop's driver is always a `Revolt\EventLoop\Driver\NativeDriver` (revolt-rs's only driver
+  class): `EventLoop::setDriver()` is refused (DIVERGENCES.md), so PHP code and every embedder
+  share that one loop;
 - when the classes are not revolt-rs's (the PHP library, if the embedder chose not to register
   them) or the owning copy is incompatible, the embedder may fall back to calling
   `Revolt\EventLoop` through PHP.
