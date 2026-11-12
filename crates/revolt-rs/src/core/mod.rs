@@ -17,7 +17,9 @@ use std::ffi::c_void;
 use std::hash::{BuildHasherDefault, Hasher};
 use std::ptr::null_mut;
 
-/// Hashes callback numbers (sequential integers) for the record map.
+/// Hashes integer keys (callback numbers, fds, object addresses) with one multiplication; the
+/// high half is folded into the low one (hashbrown picks buckets with the low bits, which an
+/// aligned address alone would leave zero).
 #[derive(Default)]
 pub struct IdHasher(u64);
 
@@ -32,8 +34,20 @@ impl Hasher for IdHasher {
         self.0 = n.wrapping_mul(0x9E37_79B9_7F4A_7C15);
     }
     #[inline(always)]
+    fn write_usize(&mut self, n: usize) {
+        self.write_u64(n as u64);
+    }
+    #[inline(always)]
+    fn write_i64(&mut self, n: i64) {
+        self.write_u64(n as u64);
+    }
+    #[inline(always)]
+    fn write_i32(&mut self, n: i32) {
+        self.write_u64(n as u64);
+    }
+    #[inline(always)]
     fn finish(&self) -> u64 {
-        self.0
+        self.0 ^ (self.0 >> 32)
     }
 }
 
