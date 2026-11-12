@@ -2,8 +2,8 @@
 
 [revolt/event-loop](https://github.com/revoltphp/event-loop), implemented natively in Rust as
 a PHP extension (`revolt`). It registers the same classes at startup, so the PHP versions never
-load, and everything built on Revolt (Amp v3, your own code) runs unchanged on a native loop, 2–8×
-faster.
+load, and everything built on Revolt (Amp v3, your own code) runs unchanged on a native loop,
+1.5–5× faster.
 
 - **Same API:** Reflection-identical to revolt/event-loop; its own test suite passes
   unchanged. Every difference is listed, with the test that pins it, in
@@ -35,16 +35,29 @@ drivers (Apple M3 Pro, PHP 8.5 NTS + opcache, release build, 5 alternating round
 
 | Case | **revolt-rs** | PHP StreamSelect | PHP Ev | PHP Uv | PHP Event | **revolt-rs vs fastest PHP** |
 |---|---|---|---|---|---|---|
-| `defer()`, 1M callbacks | **3.05 M/s** | 1.15 M/s | 1.13 M/s | 1.13 M/s | 1.12 M/s | **2.7× faster** |
-| `queue()`, 1M microtasks | **7.20 M/s** | 3.51 M/s | 3.51 M/s | 3.51 M/s | 3.54 M/s | **2.0× faster** |
-| `delay()`, 200k timers | **1.57 M/s** | 0.29 M/s | 0.79 M/s | 0.28 M/s | 0.70 M/s | **2.0× faster** |
-| `repeat()`, 1000 timers × 200 | **4.80 M/s** | 0.58 M/s | 1.78 M/s | 1.13 M/s | 1.51 M/s | **2.7× faster** |
-| `onReadable()` socket ping-pong | **0.43 M/s** | 0.27 M/s | 0.30 M/s | 0.31 M/s | 0.32 M/s | **1.3× faster** |
-| `{main}` suspend/resume | **3.81 M/s** | 1.17 M/s | 1.17 M/s | 1.19 M/s | 1.17 M/s | **3.2× faster** |
-| fiber suspend/resume | **2.89 M/s** | 1.32 M/s | 1.31 M/s | 1.30 M/s | 1.32 M/s | **2.2× faster** |
+| `defer()`, 1M callbacks | **3.99 M/s** | 1.07 M/s | 1.08 M/s | 1.06 M/s | 1.03 M/s | **3.7× faster** |
+| `queue()`, 1M microtasks | **16.99 M/s** | 3.33 M/s | 3.41 M/s | 3.44 M/s | 3.32 M/s | **4.9× faster** |
+| `delay()`, 200k timers | **2.59 M/s** | 0.24 M/s | 0.77 M/s | 0.26 M/s | 0.65 M/s | **3.4× faster** |
+| `repeat()`, 1000 timers × 200 | **9.03 M/s** | 0.56 M/s | 1.76 M/s | 1.09 M/s | 1.43 M/s | **5.1× faster** |
+| `onReadable()` socket ping-pong | **0.49 M/s** | 0.27 M/s | 0.30 M/s | 0.30 M/s | 0.31 M/s | **1.6× faster** |
+| `{main}` suspend/resume | **5.06 M/s** | 1.17 M/s | 1.14 M/s | 1.16 M/s | 1.13 M/s | **4.3× faster** |
+| fiber suspend/resume | **5.10 M/s** | 1.25 M/s | 1.27 M/s | 1.31 M/s | 1.31 M/s | **3.9× faster** |
+
+Linux (AMD Ryzen 9 5950X, PHP 8.5 NTS + opcache, the same rounds; the PHP library with
+StreamSelect, the driver available there):
+
+| Case | **revolt-rs** | PHP StreamSelect | **revolt-rs vs PHP** |
+|---|---|---|---|
+| `defer()`, 1M callbacks | **2.21 M/s** | 0.77 M/s | **2.9× faster** |
+| `queue()`, 1M microtasks | **10.35 M/s** | 1.83 M/s | **5.7× faster** |
+| `delay()`, 200k timers | **2.10 M/s** | 0.21 M/s | **9.9× faster** |
+| `repeat()`, 1000 timers × 200 | **6.74 M/s** | 0.53 M/s | **12.8× faster** |
+| `onReadable()` socket ping-pong | **0.19 M/s** | 0.13 M/s | **1.4× faster** |
+| `{main}` suspend/resume | **4.03 M/s** | 0.90 M/s | **4.5× faster** |
+| fiber suspend/resume | **4.01 M/s** | 0.94 M/s | **4.3× faster** |
 
 Every case also runs PHP closures, whose cost no loop can remove: what shrinks is the loop's own
-overhead.
+overhead. `php tools/bench/bench.php default all` has a case for every hot path.
 
 ## Build and test
 
