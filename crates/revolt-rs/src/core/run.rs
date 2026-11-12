@@ -1105,7 +1105,14 @@ pub fn error(d: D, desc: Desc, ex: Zv) {
         return;
     }
     c.error_stash = Some((c.error_handler.clone_ref(), ex, desc));
-    let f = new_fiber(d, unsafe { ERROR_FIBER_FN });
+    // the closure is made once (Revolt's $this->errorCallback); each error gets a new Fiber
+    if zval::is_undef(&d.c().error_closure.0) {
+        let cl = unsafe { fiber::closure(ERROR_FIBER_FN, d.0) };
+        d.c().error_closure = cl;
+    }
+    let mut cl = d.c().error_closure.clone_ref();
+    let f = unsafe { fiber::new_tracked(&mut cl) };
+    drop(cl);
     if f.is_null() {
         d.c().error_stash = None;
         return;

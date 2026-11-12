@@ -426,6 +426,8 @@ pub struct Core {
     /// enabled callbacks, referenced or not (the embedding API's idle check)
     pub enabled_n: usize,
     pub callback_fiber: Zv,
+    /// the error fibers' function (a Closure over the driver), made on first use
+    pub error_closure: Zv,
     /// the fiber that last suspended with the internal marker
     pub yielded: *mut sys::zend_object,
     /// the suspensions of fibers (weak keys), and `{main}`'s (cleared when it is freed)
@@ -472,6 +474,7 @@ impl Core {
             live: 0,
             enabled_n: 0,
             callback_fiber: Zv::undef(),
+            error_closure: Zv::undef(),
             yielded: null_mut(),
             suspensions: WeakTable::new(),
             main_suspension: null_mut(),
@@ -530,6 +533,7 @@ impl Core {
             add(&mut *e.0);
         }
         add(&mut *self.callback_fiber.0);
+        add(&mut *self.error_closure.0);
     }
 
     /// A new record with the next id.
