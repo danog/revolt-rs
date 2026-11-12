@@ -217,13 +217,27 @@ pub unsafe fn copy_deref(z: impl AsZ) -> Z {
     copy(deref(z))
 }
 
-/// Releases one reference (zval_ptr_dtor) and leaves UNDEF.
+/// GC_INFO_MASK (the possible-root buffer slot) and GC_NOT_COLLECTABLE, of zend_refcounted_h
+const GC_INFO_MASK: u32 = 0xffff_fc00;
+const GC_NOT_COLLECTABLE: u32 = 1 << 4;
+const GC_TYPE_MASK: u32 = 0xf;
+
+/// Releases one reference (zval_ptr_dtor) and leaves UNDEF. Inline when nothing but the
+/// decrement is to be done: others hold the value and it needs no possible-root buffering (not
+/// collectable, like strings, or buffered already); zval_ptr_dtor otherwise (destruction, a
+/// root to buffer, references).
 #[inline(always)]
 pub unsafe fn dtor(z: impl AsZ) {
     let z = z.zp();
     if is_refcounted(z) {
-        // decrements, destroys at 0, else buffers a possible cycle root
-        sys::zval_ptr_dtor(z);
+        let rc = (*z).value.counted;
+        let ti = (*rc).gc.u.type_info;
+        if (*rc).gc.refcount > 1 && ti & GC_TYPE_MASK != REFERENCE as u32 && ti & (GC_INFO_MASK | GC_NOT_COLLECTABLE) != 0 {
+            (*rc).gc.refcount -= 1;
+        } else {
+            // decrements, destroys at 0, else buffers a possible cycle root
+            sys::zval_ptr_dtor(z);
+        }
     }
     (*z).u1.type_info = UNDEF as u32;
 }

@@ -31,7 +31,15 @@ pub unsafe fn addref(s: *mut sys::zend_string) {
     }
 }
 
+/// zend_string_release(): inline unless it frees the string.
 #[inline(always)]
 pub unsafe fn release(s: *mut sys::zend_string) {
+    if (*s).gc.u.type_info & sys::IS_STR_INTERNED != 0 {
+        return;
+    }
+    if (*s).gc.refcount > 1 {
+        (*s).gc.refcount -= 1;
+        return;
+    }
     sys::ext_php_rs_zend_string_release(s)
 }
