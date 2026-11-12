@@ -81,13 +81,14 @@ final class EmbedderTest extends TestCase
         self::assertSame($path === 'native' ? ['takes' => 3, 'flushes' => 1] : ['takes' => 0, 'flushes' => 0], $r['src_batch']);
         self::assertContains($r['src_writable'], $path === 'native' ? ['native', 'ready'] : ['php']);
         self::assertSame($path, $r['src_reused']);
+        self::assertSame($path, $r['src_after_watcher']);
         self::assertSame('from a callback', $r['uncaught']);
         self::assertSame([], $r['identifiers_after_uncaught']);
         if ($path === 'native') {
             self::assertSame(['type' => 'Delay', 'listed' => true, 'referenced' => true], $r['native_id']);
-            // 3 + 1 sleeps, 1 wait, the cancelled delay; then the sleep the uncaught exception ended
-            self::assertSame(7, $r['released']);
-            self::assertSame(8, $r['released_after_uncaught']);
+            // 3 + 1 sleeps, 2 waits, the cancelled delay; then the sleep the uncaught exception ended
+            self::assertSame(8, $r['released']);
+            self::assertSame(9, $r['released_after_uncaught']);
         } else {
             self::assertNull($r['native_id']);
             self::assertSame(0, $r['released_after_uncaught']);

@@ -441,6 +441,16 @@ impl Reactor {
         }
     }
 
+    /// A source registered anew on `fd`: the fd number was closed and reused since its watchers
+    /// went, so the removal of their registration still pending (the poller dropped it with the
+    /// old fd) must not touch the source's.
+    #[cfg(unix)]
+    fn drop_stale_watcher(&mut self, fd: i64) {
+        if let Some(e) = self.fds.get_mut(&fd).filter(|e| e.want() == 0) {
+            e.registered = 0;
+        }
+    }
+
     /// Registers the source `p` with the poller if needed and arms it.
     #[cfg(target_os = "linux")]
     fn src_watch(&mut self, g: u32, p: &SrcFd, token: u64) -> Result<(), i32> {
@@ -458,6 +468,9 @@ impl Reactor {
                     return Err(err);
                 }
             }
+        }
+        if !registered {
+            self.drop_stale_watcher(p.fd);
         }
         let e = self.src.entry(p.fd).or_default();
         let want = p.events as u8 & (READ | WRITE);
@@ -483,6 +496,9 @@ impl Reactor {
             if kev(self.poller, changes, &mut [], None) < 0 {
                 return Err(errno());
             }
+        }
+        if !registered {
+            self.drop_stale_watcher(p.fd);
         }
         let e = self.src.entry(p.fd).or_default();
         let want = p.events as u8 & (READ | WRITE);

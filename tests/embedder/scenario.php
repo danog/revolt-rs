@@ -150,6 +150,26 @@ fclose($b);
 [$a, $b] = $pair();
 EventLoop::delay(0.01, static function () use ($b): void { fwrite($b, 'w'); });
 $out['src_reused'] = revolt_embed_example_src_wait($a);
+revolt_embed_example_src_forget($a);
+// a socket with the number of one whose watcher was cancelled since the last poll (its removal
+// from the poller still pending) is a source: the pending removal must not drop the source
+fclose($a);
+fclose($b);
+[$a, $b] = $pair();
+fwrite($b, 'v');
+revolt_embed_example_wait_readable($a);
+fread($a, 1);
+fclose($a);
+fclose($b);
+[$a, $b] = $pair();
+$guard = EventLoop::delay(5, static function (): void {
+    fwrite(STDERR, "the source was not woken\n");
+    exit(3);
+});
+EventLoop::delay(0.01, static function () use ($b): void { fwrite($b, 'u'); });
+$out['src_after_watcher'] = revolt_embed_example_src_wait($a);
+EventLoop::cancel($guard);
+revolt_embed_example_src_forget($a);
 
 // the embedder's callback ids are Revolt callbacks of the loop
 $id = revolt_embed_example_delay(10);
