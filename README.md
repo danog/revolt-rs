@@ -1,19 +1,14 @@
 # revolt-rs
 
-[revolt/event-loop](https://github.com/revoltphp/event-loop), implemented natively in Rust as
-a PHP extension (`revolt`). It registers the same classes at startup, so the PHP versions never
-load, and everything built on Revolt (Amp v3, your own code) runs unchanged on a native loop,
+[revolt/event-loop](https://github.com/revoltphp/event-loop) as a native PHP extension, written
+in Rust. Install it, and everything built on Revolt (Amp v3, your own code) runs unchanged,
 1.4–16× faster than the PHP library on its default `stream_select()` driver.
 
-- **Same API:** Reflection-identical to revolt/event-loop; its own test suite passes
-  unchanged. Every difference is listed, with the test that pins it, in
-  [DIVERGENCES.md](DIVERGENCES.md) (notably: one driver class, `Driver\NativeDriver`, instead of
-  the four of the PHP library; `EventLoop::setDriver()` throws, the loop always runs on it).
-- **Native reactor:** epoll (Linux), kqueue (macOS), WSAPoll (Windows); no `stream_select()`
-  limits, no ext-ev/event/uv needed, signals without ext-pcntl, precise timers.
-- **Embeddable:** other Rust extensions can drive the same loop directly from Rust, see
-  [EMBEDDING.md](EMBEDDING.md).
-- **Pure Rust:** no C libraries. PHP 8.2–8.6, NTS and ZTS, Linux, macOS, Windows.
+- **Drop-in:** the same classes and API; revolt/event-loop's own test suite passes. The few
+  differences are listed in [DIVERGENCES.md](DIVERGENCES.md).
+- **No extra extensions:** no `stream_select()` limits, and no ext-ev, ext-event, ext-uv or
+  ext-pcntl needed for fast I/O, timers and signals.
+- PHP 8.2–8.6, NTS and ZTS, on Linux, macOS and Windows.
 
 ## Install
 
@@ -21,11 +16,9 @@ load, and everything built on Revolt (Amp v3, your own code) runs unchanged on a
 pie install danog/revolt-rs
 ```
 
-Pre-built binaries for Linux, macOS and Windows; elsewhere [PIE](https://github.com/php/pie)
-builds from source (Rust + libclang). Keep requiring revolt/event-loop (or amphp/amp) as before:
-with the extension loaded, the PHP package is never used. danog/revolt-rs declares that it
-provides revolt/event-loop, so a project that requires it through Composer
-doesn't install the PHP package at all.
+[PIE](https://github.com/php/pie) installs a pre-built binary, or builds from source (Rust +
+libclang) where none matches. Keep requiring revolt/event-loop (or amphp/amp) as before: with
+the extension loaded, the PHP package is never used.
 
 ## Performance
 
@@ -60,20 +53,14 @@ StreamSelect, the driver available there):
 Every case also runs PHP closures, whose cost no loop can remove: what shrinks is the loop's own
 overhead. `php tools/bench/bench.php default all` has a case for every hot path.
 
-## Build and test
+## Development
 
 ```bash
-cargo build --release -p revolt-ext          # PHP / PHP_CONFIG select the PHP; Windows: nightly Rust
-(cd tests && composer install) && (cd tools/phplib && composer install)
-tools/test.sh                                # revolt/event-loop's suite + ours
-REVOLT_RS_PHPLIB=1 tools/test.sh             # the same against the PHP library
-tools/embed-test.sh                          # embedding tests
-tools/asan.sh build && tools/asan.sh test    # AddressSanitizer
+cargo build --release -p revolt-ext
+(cd tests && composer install) && tools/test.sh
 ```
 
-`tests/revolt` is revolt/event-loop's suite, unchanged ([tests/NOT_APPLICABLE.md](tests/NOT_APPLICABLE.md):
-the one test that cannot apply); `tests/native` holds one test per divergence plus robustness
-tests.
+Other Rust extensions can run on the same loop: see [EMBEDDING.md](EMBEDDING.md).
 
 ## License
 
