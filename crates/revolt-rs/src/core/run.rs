@@ -477,10 +477,14 @@ fn dispatch(d: D, blocking: bool) -> bool {
 }
 
 fn dispatch_native(c: &mut Core, mut blocking: bool) {
-    let delivered = c.signals.take_delivered();
-    if !delivered.is_empty() {
-        enqueue_signals(c, &delivered);
-        blocking = false;
+    if !c.signals.by_signal.is_empty() {
+        let mut delivered = std::mem::take(&mut c.sig_buf);
+        c.signals.take_delivered(false, &mut delivered);
+        if !delivered.is_empty() {
+            enqueue_signals(c, &delivered);
+            blocking = false;
+        }
+        c.sig_buf = delivered;
     }
     if blocking && !std::mem::take(&mut c.buffers_checked) {
         let mut buffered = std::mem::take(&mut c.scratch);
@@ -520,8 +524,10 @@ fn dispatch_native(c: &mut Core, mut blocking: bool) {
         c.idle = false;
     }
     if woke {
-        let delivered = c.signals.take_delivered();
+        let mut delivered = std::mem::take(&mut c.sig_buf);
+        c.signals.take_delivered(true, &mut delivered);
         enqueue_signals(c, &delivered);
+        c.sig_buf = delivered;
     }
     if c.timers.len() > 0 {
         let now = clock::now();

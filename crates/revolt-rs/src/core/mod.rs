@@ -372,6 +372,8 @@ pub struct Core {
     pub tick_buf: Vec<Cid>,
     /// a scratch buffer of dispatch()
     pub scratch: Vec<Cid>,
+    /// the signals a dispatch found delivered (kept: no allocation)
+    pub sig_buf: Vec<i32>,
     /// tick() found no PHP-buffered stream data just before the blocking poll it leads to
     pub buffers_checked: bool,
     pub microtasks: VecDeque<Microtask>,
@@ -424,6 +426,7 @@ impl Core {
             callback_queue: VecDeque::new(),
             tick_buf: Vec::new(),
             scratch: Vec::new(),
+            sig_buf: Vec::new(),
             buffers_checked: false,
             microtasks: VecDeque::new(),
             microtask_args: VecDeque::new(),

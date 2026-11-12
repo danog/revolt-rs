@@ -87,7 +87,8 @@ mod imp {
     pub struct Watchers {
         /// signal => callbacks, in activation order
         pub by_signal: HashMap<i32, Vec<crate::core::Cid>>,
-        seen: HashMap<i32, u64>,
+        /// (signal, its counter when last looked at), by signal
+        seen: Vec<(i32, u64)>,
         pipe: Option<(i32, i32)>,
         slot: Option<usize>,
         fork_gen: u64,
@@ -99,7 +100,8 @@ mod imp {
             self.ensure_pipe().map_err(|e| (e, std::io::Error::from_raw_os_error(e).to_string()))?;
             if !self.by_signal.contains_key(&sig) {
                 install(sig).map_err(|e| (e, std::io::Error::from_raw_os_error(e).to_string()))?;
-                self.seen.insert(sig, COUNTERS[sig as usize].load(Ordering::SeqCst));
+                let at = self.seen.partition_point(|&(s, _)| s < sig);
+                self.seen.insert(at, (sig, COUNTERS[sig as usize].load(Ordering::SeqCst)));
             }
             self.by_signal.entry(sig).or_default().push(id);
             Ok(())
@@ -112,7 +114,7 @@ mod imp {
             }
             if v.is_empty() {
                 self.by_signal.remove(&sig);
-                self.seen.remove(&sig);
+                self.seen.retain(|&(s, _)| s != sig);
                 uninstall(sig);
             }
             if self.by_signal.is_empty() {
@@ -125,27 +127,24 @@ mod imp {
             self.pipe.map_or(-1, |p| p.0 as i64)
         }
 
-        /// The signals delivered since the last call (each once), in signal order; drains the pipe.
-        pub fn take_delivered(&mut self) -> Vec<i32> {
-            let mut out = Vec::new();
-            if self.by_signal.is_empty() {
-                return out;
-            }
-            if let Some((r, _)) = self.pipe {
-                let mut buf = [0u8; 64];
-                while unsafe { libc::read(r, buf.as_mut_ptr() as *mut _, buf.len()) } > 0 {}
-            }
-            let mut sigs: Vec<i32> = self.seen.keys().copied().collect();
-            sigs.sort_unstable();
-            for s in sigs {
-                let c = COUNTERS[s as usize].load(Ordering::SeqCst);
-                let seen = self.seen.get_mut(&s).unwrap();
+        /// The signals delivered since the last call (each once), in signal order, into `out`
+        /// (cleared first). The wake pipe is drained when some were, or when the poll reported
+        /// it (`woke`): no system call otherwise.
+        pub fn take_delivered(&mut self, woke: bool, out: &mut Vec<i32>) {
+            out.clear();
+            for (s, seen) in self.seen.iter_mut() {
+                let c = COUNTERS[*s as usize].load(Ordering::SeqCst);
                 if c != *seen {
                     *seen = c;
-                    out.push(s);
+                    out.push(*s);
                 }
             }
-            out
+            if woke || !out.is_empty() {
+                if let Some((r, _)) = self.pipe {
+                    let mut buf = [0u8; 64];
+                    while unsafe { libc::read(r, buf.as_mut_ptr() as *mut _, buf.len()) } > 0 {}
+                }
+            }
         }
 
         fn ensure_pipe(&mut self) -> Result<(), i32> {
@@ -223,8 +222,8 @@ mod imp {
         pub fn wake_fd(&self) -> i64 {
             -1
         }
-        pub fn take_delivered(&mut self) -> Vec<i32> {
-            Vec::new()
+        pub fn take_delivered(&mut self, _woke: bool, out: &mut Vec<i32>) {
+            out.clear();
         }
     }
 }
