@@ -5,22 +5,21 @@
 //!   Every copy exports one as the symbol `revolt_rs_abi_v1`; a copy that is not the owner finds
 //!   the owner's from the address of the handler of `Revolt\EventLoop::getDriver` (dladdr +
 //!   dlsym on Unix, GetModuleHandleEx + GetProcAddress on Windows).
-//! - [`NativeLoop::current`] gives the fast path when the thread's driver is a native revolt-rs
-//!   driver of a compatible owner (StreamSelectDriver/EvDriver/EventDriver/UvDriver, not a PHP
-//!   subclass, not a TracingDriver, not a user Driver). Otherwise the embedder calls
-//!   `Revolt\EventLoop` through PHP ([`php`]), which also covers the PHP library.
+//! - [`NativeLoop::current`] gives the thread's driver (always a native one: `setDriver()` is
+//!   refused) through the owner's table when that is compatible. Otherwise (an incompatible
+//!   owner, or classes that are not revolt-rs's) the embedder may call `Revolt\EventLoop` through
+//!   PHP ([`php`]).
 //! - Callbacks are Rust functions `cb(data, id)`; `release(data)` (optional) runs exactly once,
 //!   when the callback is gone (fired once, cancelled, or its driver destroyed). Neither may
 //!   call back into the loop for the same callback from `release`.
 //! - Ids are real Revolt callbacks of the driver (visible to getIdentifiers(), cancellable by
 //!   their string id); the API uses their numbers ("a" = 1).
 
-use crate::classes::{self, driver as dr, suspension};
+use crate::classes::{self, suspension};
 use crate::core::run::{self, D};
-use crate::core::{Cb, DriverKind, Microtask, NativeFn, ReleaseFn};
+use crate::core::{Cb, Microtask, NativeFn, ReleaseFn};
 use crate::zend::{call, stream::Handle, sys, zval, zval::Zv};
 use std::ffi::{c_char, c_void};
-use std::ptr::null_mut;
 use std::sync::OnceLock;
 
 /// The ABI major version: a copy uses another copy's table only with the same major and a size
@@ -39,8 +38,8 @@ pub struct Abi {
     pub version: *const c_char,
     /// revolt/event-loop version implemented, NUL-terminated
     pub revolt_version: *const c_char,
-    /// The thread's driver (EventLoop::getDriver(), created if needed) when it is natively
-    /// drivable; null otherwise (or with an exception pending). Borrowed.
+    /// The thread's driver (EventLoop::getDriver(), created if needed; always native since
+    /// minor 1, which refuses setDriver()); null with an exception pending. Borrowed.
     pub current: unsafe extern "C" fn() -> *mut sys::zend_object,
     /// onReadable/onWritable on an OS handle (an fd; a SOCKET on Windows when `socket`). The
     /// callback functions take `(f, data, release, held)`: see [`NativeLoop::delay`].
@@ -74,15 +73,8 @@ pub struct Abi {
 unsafe impl Sync for Abi {}
 
 unsafe extern "C" fn abi_current() -> *mut sys::zend_object {
-    let d = classes::eventloop::driver();
-    if d.is_null() || !dr::is_native(d) {
-        return null_mut();
-    }
-    let c = D(d).c();
-    if c.kind == DriverKind::User || c.kind == DriverKind::Gc {
-        return null_mut();
-    }
-    d
+    // always a native driver of a built-in class (setDriver() is refused)
+    classes::eventloop::driver()
 }
 
 unsafe fn native_cb(f: NativeFn, data: *mut c_void, release: Option<ReleaseFn>, held: *mut sys::zend_object) -> Cb {

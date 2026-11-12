@@ -80,6 +80,27 @@ pub unsafe fn create() -> *mut sys::zend_object {
     d
 }
 
+/// The event loop's own driver (owned; null with an exception): DriverFactory::create()'s
+/// choice, restricted to the four built-in classes (all the same native driver): REVOLT_DRIVER
+/// is honoured when it names one of them, otherwise ignored, as REVOLT_DRIVER_DEBUG_TRACE is
+/// (a TracingDriver or a user driver cannot run the loop).
+pub unsafe fn create_loop_driver() -> *mut sys::zend_object {
+    let ces = ce();
+    let named = crate::zend::getenv("REVOLT_DRIVER").filter(|v| truthy(&Some(v.clone()))).and_then(|name| {
+        let lc = name.trim_start_matches('\\').to_ascii_lowercase();
+        let cls = call::lookup_class(lc.as_bytes());
+        [ces.stream_select, ces.ev, ces.event, ces.uv].into_iter().find(|&c| !cls.is_null() && c == cls)
+    });
+    let cls = match named {
+        Some(c) => c,
+        None if super::driver::extension_loaded(b"uv") => ces.uv,
+        None if super::driver::extension_loaded(b"ev") => ces.ev,
+        None if super::driver::extension_loaded(b"event") => ces.event,
+        None => ces.stream_select,
+    };
+    call::new_object(cls, &mut [])
+}
+
 unsafe extern "C" fn create_handler(ex: Ex, rv: *mut sys::zval) {
     if !call::none(ex) {
         return;

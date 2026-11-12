@@ -4,7 +4,7 @@
 //! A `D` is a driver object; `d.c()` is its Core. A `&mut Core` is never kept across a call into
 //! PHP (which may re-enter the driver): it is fetched again after each call.
 
-use super::{backend, clock, Cb, Core, Desc, DriverKind, Interrupt, Kind, Microtask, Phase};
+use super::{backend, clock, Cb, Core, Desc, Interrupt, Kind, Microtask, Phase};
 use crate::classes;
 use crate::zend::{self, call, fiber, hash, stream, sys, zstr, zval, zval::Zv};
 use std::ptr::null_mut;
@@ -242,14 +242,6 @@ pub fn v_enable(d: D, id: u64) -> bool {
 /// activate($callbacks): false when it threw (the callbacks not activated go back to the queue).
 fn activate(d: D, ids: &[u64]) -> bool {
     let c = d.c();
-    if c.kind == DriverKind::Gc {
-        if ids.is_empty() {
-            return true;
-        }
-        requeue(c, ids);
-        unsafe { call::throw_error("Can't activate callback during garbage collection.") };
-        return false;
-    }
     if let Some(f) = c.hooks.activate {
         unsafe {
             let arr = hash::new(ids.len() as u32);
@@ -377,9 +369,6 @@ fn activate_native(c: &mut Core, id: u64) -> Result<(), ActivateError> {
 /// deactivate($callback): false when a userland deactivate() threw.
 fn deactivate(d: D, id: u64) -> bool {
     let c = d.c();
-    if c.kind == DriverKind::Gc {
-        return true;
-    }
     if let Some(f) = c.hooks.deactivate {
         unsafe {
             let v = classes::callbacks::view(d, id);
@@ -436,10 +425,6 @@ fn deactivate_record(c: &mut Core, r: &mut super::Record) {
 /// dispatch($blocking): false when it threw.
 fn dispatch(d: D, blocking: bool) -> bool {
     let c = d.c();
-    if c.kind == DriverKind::Gc {
-        unsafe { call::throw_error("Can't dispatch during garbage collection.") };
-        return false;
-    }
     if let Some(f) = c.hooks.dispatch {
         unsafe {
             let mut a = zval::bool(blocking);

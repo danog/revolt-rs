@@ -194,8 +194,6 @@ pub enum DriverKind {
     Ev,
     Event,
     Uv,
-    /// EventLoop::setDriver()'s temporary driver during gc_collect_cycles()
-    Gc,
     /// a PHP class extending AbstractDriver
     User,
 }

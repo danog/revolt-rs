@@ -8,8 +8,7 @@ use PHPUnit\Framework\TestCase;
 
 /**
  * examples/embedder (revolt_embed_example) loaded alone, with the standalone extension in both
- * orders, with incompatible owners, with drivers it cannot drive natively and with the PHP
- * library. Each case runs scenario.php in a php process of its own (php -n plus the extensions
+ * orders, with incompatible owners and with the PHP library. Each case runs scenario.php in a php process of its own (php -n plus the extensions
  * named by the environment; tools/embed-test.sh builds them and sets it):
  *
  * - REVOLT_EMBED_EXT: the embedder extension (required);
@@ -56,7 +55,7 @@ final class EmbedderTest extends TestCase
     }
 
     /** What every case does the same, natively or through PHP. */
-    private static function assertWorks(array $r, string $path, bool $streams = true): void
+    private static function assertWorks(array $r, string $path, bool $streams = true, bool $phpLibrary = false): void
     {
         self::assertSame($path, $r['sleep_main']);
         self::assertTrue($r['slept_enough']);
@@ -76,6 +75,10 @@ final class EmbedderTest extends TestCase
         } else {
             self::assertNull($r['native_id']);
             self::assertSame(0, $r['released_after_uncaught']);
+        }
+        if ($path === 'native' || !$phpLibrary) {
+            self::assertSame('Revolt\\EventLoop::setDriver() is not supported: the event loop always runs on its native driver', $r['set_driver']);
+            self::assertTrue($r['same_driver']);
         }
     }
 
@@ -123,24 +126,6 @@ final class EmbedderTest extends TestCase
         self::assertWorks($r, 'php');
     }
 
-    public static function foreignDrivers(): iterable
-    {
-        yield 'TracingDriver' => ['tracing', 'Revolt\EventLoop\Driver\TracingDriver', true];
-        yield 'user Driver' => ['user-driver', 'DelegatingDriver', true];
-        yield 'PHP subclass of AbstractDriver' => ['subclass', 'SleepingDriver', false];
-    }
-
-    /** @dataProvider foreignDrivers */
-    public function testDriverNotNativeFallsBackToPhp(string $scenario, string $class, bool $streams): void
-    {
-        foreach ([[self::ext('REVOLT_EMBED_EXT')], [self::ext('REVOLT_EXT'), self::ext('REVOLT_EMBED_EXT')]] as $extensions) {
-            $r = self::runScenario($extensions, $scenario);
-            self::assertSame('php', $r['mode']);
-            self::assertSame($class, $r['driver']);
-            self::assertWorks($r, 'php', $streams);
-        }
-    }
-
     public function testPhpLibraryFallback(): void
     {
         $r = self::runScenario([self::ext('REVOLT_EMBED_EXT')], 'default', [
@@ -151,14 +136,14 @@ final class EmbedderTest extends TestCase
         self::assertFalse($r['owner']);
         self::assertFalse($r['internal_classes']);
         self::assertNull($r['classes_module']);
-        self::assertWorks($r, 'php');
+        self::assertWorks($r, 'php', true, true);
     }
 
-    /** Native callbacks pending when their driver goes (collected) and at the end of the script. */
-    public function testPendingCallbacks(): void
+    /** Native callbacks and waits pending at the end of the script are freed at shutdown. */
+    public function testPendingAtShutdown(): void
     {
         foreach ([[self::ext('REVOLT_EMBED_EXT')], [self::ext('REVOLT_EXT'), self::ext('REVOLT_EMBED_EXT')]] as $extensions) {
-            self::assertSame(['released_by_set_driver' => 2], self::runScenario($extensions, 'pending'));
+            self::assertSame(['pending' => true], self::runScenario($extensions, 'pending'));
         }
     }
 }

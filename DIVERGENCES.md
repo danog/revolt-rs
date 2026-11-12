@@ -16,18 +16,28 @@ passes on both, so it shows behaviour that is the same.
   Pinned by `ReflectionTest::testClassesAreInternal`.
 - The private properties of the PHP classes are declared (Reflection lists them) but the native
   classes keep their state in Rust: they stay at their defaults/uninitialised. Exceptions:
-  `EventLoop::$driver` (written by setDriver()), the DriverCallback properties, TimerQueue's
+  `EventLoop::$driver` (the loop's driver, set when it is made), the DriverCallback properties, TimerQueue's
   arrays, FiberLocal's `$initializer` and InvalidCallbackError's properties, which are real.
   Pinned by `ReflectionTest::testPrivateStateStaysAtDefaults`.
 - The private methods (`tick()`, `invokeCallbacks()`, `selectStreams()`, ...) exist but do
   nothing (`isEmpty()` and `callbackId()` work); they are reachable through Reflection only.
   Pinned by `ReflectionTest::testPrivateMethodsDoNothing`.
-- `EventLoop::setDriver()`'s temporary driver is an instance of the internal class
-  `Revolt\EventLoop\Internal\AbstractDriver@anonymous` (PHP's name for it ends with the
-  file and line). Pinned by `SetDriverTest::testTemporaryDriverClass`.
 
 ## Behaviour
 
+- **The loop's driver cannot be replaced.** `EventLoop::setDriver()` always throws
+  `UnsupportedFeatureException("Revolt\EventLoop::setDriver() is not supported: the event loop
+  always runs on its native driver")` (after its argument check) and changes nothing:
+  `EventLoop::getDriver()` is always the native driver the loop made, so extensions embedding
+  revolt-rs (a database driver's I/O, say) always share one native loop with PHP code. Writing
+  `EventLoop::$driver` (Reflection, a bound closure) does not change it either. The loop makes its
+  driver as `DriverFactory::create()` would, except that `REVOLT_DRIVER` is honoured only when it
+  names one of the four built-in driver classes (all the same native driver) and
+  `REVOLT_DRIVER_DEBUG_TRACE` is ignored. `DriverFactory::create()`, the `Driver\*` classes,
+  `TracingDriver` and PHP subclasses of `AbstractDriver` are unchanged: such drivers work when
+  used directly (`$driver->run()`), they just never become the loop's. Revolt's own tests that
+  swap the driver are excluded (tests/NOT_APPLICABLE.md). Pinned by `SetDriverTest` and
+  `tests/native/destruction_order.phpt`.
 - **No FD_SETSIZE limit.** StreamSelectDriver uses epoll/kqueue/WSAPoll: any number of streams,
   no "You have reached the limits of stream_select()" exception. Pinned by
   `NoFdSetSizeLimitTest`.
@@ -75,10 +85,7 @@ passes on both, so it shows behaviour that is the same.
   `SuspensionTest::testUncaughtFromResumedFiberNamesResume`.
 - **TracingDriver's wrapper closures** are named `Revolt\EventLoop\Driver\TracingDriver::{closure}`
   in error messages (PHP 8.4+ names Revolt's `{closure:...::defer():NN}`, with a file and line).
-  For the same reason (`EventLoop` is an internal class), the creation traces of
-  `TracingDriver::dump()` have no `EventLoop.php:NN` frame for calls made through the facade.
-  Pinned by `TracingDriverDumpTest::testWrapperClosureName` and
-  `SetDriverTest::testDumpThroughFacadeHasNoEventLoopFrame`.
+  Pinned by `TracingDriverDumpTest::testWrapperClosureName`.
 - **A PHP subclass of AbstractDriver** that writes to a DriverCallback's public properties
   (`$callback->enabled = false`) changes only that object: the loop keeps its own state, written
   through to the objects it hands out. A subclass that does not call `parent::__construct()`

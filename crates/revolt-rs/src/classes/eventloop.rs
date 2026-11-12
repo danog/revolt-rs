@@ -7,7 +7,7 @@ use super::{arg as a, av, ce, method as m, Ces, F_PRI as PRI, F_PUB as PUB, F_ST
 use super::{T_A, T_B, T_CBT, T_CL, T_CLN, T_DRV, T_F, T_I, T_MIX, T_S, T_SUSP, T_V};
 use crate::core::run::D;
 use crate::zend::class::{self as k, Default as Dv, NONE};
-use crate::zend::{self, call, call::Ex, sys, zstr, zval, zval::Zv};
+use crate::zend::{call, call::Ex, sys, zstr, zval};
 use crate::{zh, zpp};
 use std::cell::Cell;
 use std::ptr::null_mut;
@@ -23,7 +23,8 @@ pub fn current() -> *mut sys::zend_object {
     DRIVER.with(|c| c.get())
 }
 
-/// EventLoop::getDriver() (borrowed), or null with an exception.
+/// EventLoop::getDriver() (borrowed), or null with an exception. Always a native driver of one
+/// of the four built-in classes: setDriver() is refused, so this is the loop's only driver.
 #[inline(always)]
 pub fn driver() -> *mut sys::zend_object {
     let d = current();
@@ -31,13 +32,17 @@ pub fn driver() -> *mut sys::zend_object {
         return d;
     }
     unsafe {
-        let n = super::factory::create();
+        let n = super::factory::create_loop_driver();
         if n.is_null() {
             return n;
         }
-        set_driver(n);
-        let mut z = zval::obj_owned(n);
-        zval::dtor(&mut z);
+        // EventLoop::$driver too (Reflection shows it, as the PHP library's)
+        store(n);
+        let name = zstr::new(b"driver");
+        let mut v = zval::obj_owned(n);
+        sys::zend_update_static_property_ex(ce().event_loop, name, &mut *v);
+        zval::dtor(&mut v);
+        zstr::release(name);
     }
     current()
 }
@@ -54,40 +59,8 @@ unsafe fn store(d: *mut sys::zend_object) {
     }
 }
 
-/// EventLoop::setDriver(): refused while the current driver runs; a garbage-collection driver
-/// stands in while gc_collect_cycles() runs, so destructors do not reach the old driver.
-pub unsafe fn set_driver(d: *mut sys::zend_object) {
-    let cur = current();
-    if !cur.is_null() {
-        let running = if native_for(cur, bit("isrunning")) {
-            dr::running(D(cur))
-        } else {
-            let mut r = call::method(cur, b"isrunning", &mut []);
-            if call::has_exception() {
-                return;
-            }
-            sys::zend_is_true(r.as_ptr()) as i32 != 0
-        };
-        if running {
-            call::throw_error("Can't swap the event loop driver while the driver is running");
-            return;
-        }
-    }
-    let gc = call::new_object(ce().gc_driver, &mut []);
-    if !gc.is_null() {
-        store(gc);
-        let mut z = zval::obj_owned(gc);
-        zval::dtor(&mut z);
-        zend::gc_collect_cycles();
-    }
-    // finally: the new driver, even when the collection threw
-    store(d);
-    let name = zstr::new(b"driver");
-    let mut v = zval::obj_ref(d);
-    sys::zend_update_static_property_ex(ce().event_loop, name, &mut *v);
-    zval::dtor(&mut v);
-    zstr::release(name);
-}
+/// EventLoop::setDriver()'s message: the loop's driver cannot be replaced.
+pub const SET_DRIVER_REFUSED: &str = "Revolt\\EventLoop::setDriver() is not supported: the event loop always runs on its native driver";
 
 /// RSHUTDOWN: the driver goes.
 pub unsafe fn rshutdown() {
@@ -242,6 +215,5 @@ unsafe extern "C" fn set_driver_h(ex: Ex, _rv: *mut sys::zval) {
     if !zpp!(ex, "O", &mut z, ce().driver) {
         return;
     }
-    let _hold = Zv(zval::copy(z));
-    set_driver((*z).value.obj);
+    call::throw(ce().unsupported_feature, SET_DRIVER_REFUSED);
 }

@@ -60,8 +60,6 @@ fn kind_of(ce: *mut sys::zend_class_entry) -> DriverKind {
         DriverKind::Event
     } else if ce == c.uv {
         DriverKind::Uv
-    } else if ce == c.gc_driver {
-        DriverKind::Gc
     } else {
         DriverKind::User
     }
@@ -409,7 +407,7 @@ pub unsafe fn on_signal_d(ex: Ex, rv: *mut sys::zval, d: D) {
         return;
     }
     let d = d;
-    if d.c().kind != DriverKind::User && d.c().kind != DriverKind::Gc && !crate::core::signal::SUPPORTED {
+    if d.c().kind != DriverKind::User && !crate::core::signal::SUPPORTED {
         call::throw(ce().unsupported_feature, "Signal handling requires the pcntl extension");
         return;
     }
@@ -916,17 +914,7 @@ pub unsafe fn register_drivers(ces: &mut Ces) {
         k::prop(u, n, T_CL, pr | k::READONLY, Dv::Undef);
     }
 
-    // EventLoop::setDriver()'s anonymous class (activate/dispatch throw)
-    let gc = vec![
-        m("activate", zh!(native_activate), PRO, T_V, vec![a("callbacks", T_A)]),
-        m("dispatch", zh!(native_dispatch), PRO, T_V, vec![a("blocking", T_B)]),
-        m("deactivate", zh!(native_deactivate), PRO, T_V, vec![a("callback", T_DCB)]),
-        m("getHandle", zh!(get_handle), PUB, T_MIX, vec![]),
-        m("now", zh!(native_now), PRO, T_F, vec![]),
-    ];
-    ces.gc_driver = k::register_class("Revolt\\EventLoop\\Internal\\AbstractDriver@anonymous", gc, ad, k::FINAL);
-
-    for cls in [ces.stream_select, ces.ev, ces.event, ces.uv, ces.gc_driver] {
+    for cls in [ces.stream_select, ces.ev, ces.event, ces.uv] {
         (*cls).__bindgen_anon_2.create_object = Some(create_object);
     }
     run::minit(ad);

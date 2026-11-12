@@ -60,7 +60,7 @@ version as the revolt-rs they embed (see [EMBEDDING.md](EMBEDDING.md#composer)).
 | revolt/event-loop | 1.0.9: the API (Reflection-identical) and behaviour of every class |
 | PHP | 8.2, 8.3, 8.4, 8.5, 8.6; NTS and ZTS; non-debug builds; 64-bit |
 | OS | Linux and macOS (x86-64, arm64), Windows (x86-64); the BSDs' kqueue backend is the macOS one, untested there |
-| Drivers | `StreamSelectDriver`, `EvDriver`, `EventDriver`, `UvDriver` all run on the native reactor (the last three keep their `isSupported()` and `getHandle()`), `TracingDriver`, user `Driver` implementations and PHP subclasses of `AbstractDriver` work as in Revolt |
+| Drivers | `StreamSelectDriver`, `EvDriver`, `EventDriver`, `UvDriver` all run on the native reactor (the last three keep their `isSupported()` and `getHandle()`), `TracingDriver`, user `Driver` implementations and PHP subclasses of `AbstractDriver` work as in Revolt when used directly; the loop's own driver is always native: `EventLoop::setDriver()` throws (DIVERGENCES.md) |
 | Differences | [DIVERGENCES.md](DIVERGENCES.md), each pinned by a test of `tests/native` |
 
 ## Performance
