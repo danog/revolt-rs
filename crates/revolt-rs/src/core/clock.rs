@@ -7,8 +7,21 @@ const CLOCK: libc::clockid_t = libc::CLOCK_UPTIME_RAW;
 #[cfg(all(unix, not(target_os = "macos")))]
 const CLOCK: libc::clockid_t = libc::CLOCK_MONOTONIC;
 
+#[cfg(target_os = "macos")]
+extern "C" {
+    fn clock_gettime_nsec_np(clock: libc::clockid_t) -> u64;
+}
+
+/// Seconds (with nanoseconds) on the monotonic clock: macOS reads its nanoseconds directly (what
+/// clock_gettime() and PHP's hrtime() read too).
+#[cfg(target_os = "macos")]
+#[inline]
+pub fn now() -> f64 {
+    unsafe { clock_gettime_nsec_np(CLOCK) as f64 / 1e9 }
+}
+
 /// Seconds (with nanoseconds) on the monotonic clock.
-#[cfg(unix)]
+#[cfg(all(unix, not(target_os = "macos")))]
 #[inline]
 pub fn now() -> f64 {
     let mut ts = libc::timespec { tv_sec: 0, tv_nsec: 0 };
