@@ -2,10 +2,10 @@
 //! [value])), `{main}` keyed by a dummy Fiber. The maps are held per thread and released at
 //! RSHUTDOWN.
 
-use super::{arg as a, ce, method as m, Ces, F_PRI as PRI, F_PUB as PUB, F_STA as STA};
+use super::{arg as a, method as m, Ces, F_PRI as PRI, F_PUB as PUB, F_STA as STA};
 use super::{T_CL, T_MIX, T_V};
 use crate::zend::class::{self as k, c, Default as Dv, NONE};
-use crate::zend::{self, call, call::Ex, fiber, hash, obj, sys, zval, zval::Zv};
+use crate::zend::{self, call, call::Ex, fiber, hash, obj, sys, zval};
 use crate::{zh, zpp};
 use std::cell::Cell;
 use std::ptr::null_mut;
@@ -63,31 +63,34 @@ unsafe fn new_weakmap() -> *mut sys::zend_object {
     z.value.obj
 }
 
-/// $map[$key] (borrowed) or null
+/// BP_VAR_IS: a read that is no error for a missing key
+const BP_VAR_IS: i32 = 3;
+
+// The WeakMap handlers only read the key zval (a weak key: no reference is kept), so it borrows
+// the object.
+
+/// $map[$key] (borrowed) or null: one lookup.
 unsafe fn wm_get(map: *mut sys::zend_object, key: *mut sys::zend_object) -> *mut sys::zval {
-    let mut k = zval::obj_ref(key);
-    let r = if ((*(*map).handlers).has_dimension.unwrap())(map, &mut *k, 0) != 0 {
-        let mut rv = zval::undef();
-        ((*(*map).handlers).read_dimension.unwrap())(map, &mut *k, 0, &mut *rv)
-    } else {
+    let mut k = zval::obj_borrowed(key);
+    let mut rv = zval::undef();
+    let r = ((*(*map).handlers).read_dimension.unwrap())(map, &mut *k, BP_VAR_IS, &mut *rv);
+    if r.is_null() || zval::is_undef(r) {
         null_mut()
-    };
-    zval::dtor(&mut k);
-    r
+    } else {
+        r
+    }
 }
 
 unsafe fn wm_set(map: *mut sys::zend_object, key: *mut sys::zend_object, v: zval::Z) {
-    let mut k = zval::obj_ref(key);
+    let mut k = zval::obj_borrowed(key);
     let mut v = v;
     ((*(*map).handlers).write_dimension.unwrap())(map, &mut *k, &mut *v);
     zval::dtor(&mut v);
-    zval::dtor(&mut k);
 }
 
 unsafe fn wm_unset(map: *mut sys::zend_object, key: *mut sys::zend_object) {
-    let mut k = zval::obj_ref(key);
+    let mut k = zval::obj_borrowed(key);
     ((*(*map).handlers).unset_dimension.unwrap())(map, &mut *k);
-    zval::dtor(&mut k);
 }
 
 /// FiberLocal::clear(): the current fiber's values go (after each event loop callback).
@@ -105,10 +108,10 @@ pub fn clear() {
         if f.is_null() {
             return;
         }
+        // alive through the unset (destructors it runs may call clear() again)
         (*storage).gc.refcount += 1;
         wm_unset(storage, f);
-        let mut z = zval::obj_owned(storage);
-        zval::dtor(&mut z);
+        zval::obj_unref_pair(storage);
     }
 }
 
@@ -184,7 +187,7 @@ unsafe extern "C" fn set(ex: Ex, _rv: *mut sys::zval) {
     let arr = hash::new(1);
     hash::push(arr, zval::copy_deref(v));
     wm_set(s, call::this(ex), zval::arr_owned(arr));
-    drop(Zv(zval::obj_owned(s)));
+    zval::obj_unref_pair(s);
 }
 
 unsafe extern "C" fn unset(ex: Ex, _rv: *mut sys::zval) {
@@ -196,7 +199,7 @@ unsafe extern "C" fn unset(ex: Ex, _rv: *mut sys::zval) {
         return;
     }
     wm_unset(s, call::this(ex));
-    drop(Zv(zval::obj_owned(s)));
+    zval::obj_unref_pair(s);
 }
 
 unsafe extern "C" fn get(ex: Ex, rv: *mut sys::zval) {
@@ -208,24 +211,24 @@ unsafe extern "C" fn get(ex: Ex, rv: *mut sys::zval) {
     if s.is_null() {
         return;
     }
-    let holder = Zv(zval::obj_owned(s));
-    if wm_get(s, this).is_null() {
+    let mut z = wm_get(s, this);
+    if z.is_null() {
         let init = obj::prop(this, INITIALIZER);
         let mut v = call::call_closure(zval::obj(init), &mut []);
         if call::has_exception() {
+            zval::obj_unref_pair(s);
             return;
         }
         let arr = hash::new(1);
         hash::push(arr, v.take());
         wm_set(s, this, zval::arr_owned(arr));
+        z = wm_get(s, this);
     }
-    let z = wm_get(s, this);
     if !z.is_null() && zval::ty(z) == zval::ARRAY {
         let first = hash::find_index((*z).value.arr, 0);
         if !first.is_null() {
             zval::write(rv, zval::copy_deref(first));
         }
     }
-    drop(holder);
-    let _ = ce();
+    zval::obj_unref_pair(s);
 }
