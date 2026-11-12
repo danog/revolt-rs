@@ -134,6 +134,8 @@ pub struct Reactor {
     /// the entries marked `always` (so that a poll looks for them only when there are some)
     n_always: usize,
     dirty: Vec<i64>,
+    /// emptied watcher lists of fds no longer watched (kept: no allocation for the next ones)
+    spare: Vec<Vec<super::Cid>>,
     #[cfg(unix)]
     poller: i32,
     #[cfg(unix)]
@@ -216,6 +218,7 @@ impl Reactor {
             php_readers: Vec::new(),
             n_always: 0,
             dirty: Vec::new(),
+            spare: Vec::new(),
             #[cfg(unix)]
             poller: -1,
             #[cfg(unix)]
@@ -240,7 +243,8 @@ impl Reactor {
     }
 
     pub fn add(&mut self, fd: i64, socket: bool, res: i64, id: super::Cid, dir: u8) {
-        let e = self.fds.entry(fd).or_default();
+        let spare = &mut self.spare;
+        let e = self.fds.entry(fd).or_insert_with(|| FdEntry { readers: spare.pop().unwrap_or_default(), writers: spare.pop().unwrap_or_default(), ..FdEntry::default() });
         e.socket = socket;
         if e.want() == 0 || e.res != res {
             // the fd may have been closed and reused since it was registered: register anew
@@ -644,8 +648,12 @@ impl Reactor {
 
     /// Brings the poller's interest in line with the watchers.
     fn apply(&mut self) {
-        let dirty = std::mem::take(&mut self.dirty);
-        for fd in dirty {
+        if self.dirty.is_empty() {
+            return;
+        }
+        // (its buffer comes back below: no allocation per poll)
+        let mut dirty = std::mem::take(&mut self.dirty);
+        for &fd in &dirty {
             let Some(e) = self.fds.get_mut(&fd) else { continue };
             e.dirty = false;
             let want = e.want();
@@ -654,7 +662,10 @@ impl Reactor {
                 if e.always {
                     self.n_always -= 1;
                 }
-                self.fds.remove(&fd);
+                if let Some(e) = self.fds.remove(&fd) {
+                    // their buffers serve the next fd watched
+                    self.spare.extend([e.readers, e.writers]);
+                }
                 #[cfg(unix)]
                 if had != 0 {
                     self.ctl(fd, had, 0);
@@ -685,6 +696,8 @@ impl Reactor {
                 e.registered = want;
             }
         }
+        dirty.clear();
+        self.dirty = dirty;
     }
 
     #[cfg(unix)]
