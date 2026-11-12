@@ -121,6 +121,28 @@ reason, NOT in tests/NOT_APPLICABLE.md (which excludes everywhere).
   epoll_wait with a timeout +0.3, nested epoll + drain 7.22, extra non-blocking poll +0.15.
 - tools/bench/bench.php: unchanged within noise.
 
+## One driver class (2026-11-12, maintainer decision)
+
+9e2378f: `Driver\NativeDriver` replaces StreamSelect/Ev/Event/UvDriver (DIVERGENCES.md "One
+driver class"; REVOLT_DRIVER ignored, getHandle() null). The carried driver suite runs through
+`tests/native/NativeDriverTest` (extends the carried StreamSelectDriverTest) and
+`NativeTracingDriverTest`; tests/native uses `Drivers::create()` (the library's
+StreamSelectDriver in the baseline run); NOT_APPLICABLE.md takes `Class::*`;
+`tools/dump-api.php diff` reports the expected difference.
+
+## Optimisation pass (2026-11-12)
+
+Hot paths without needless work; per-change notes in the commits (953891b..HEAD). Main points:
+records in a chunked slab addressed by slot (Cid) from every queue, fd/signal list and the timer
+heap (4-ary, positions in a dense array); no allocation per defer/queue/delay/repeat/suspend/
+resume in steady state (DHAT: e.g. queue 3 -> 0, suspend-fiber 6 -> 1 = the bench's own closure);
+in-flight values in reused per-fiber frames; inline zval/string releases; refcount pairs without
+root buffering; macOS kevent64 (a non-waiting poll: 12 µs -> 0.15 µs); a dense list of PHP-stream
+readers for the buffered-data scan; FiberLocal in one WeakMap lookup. Bug fixed on the way
+(a30a9cb): a cancelled watcher's pending removal on a reused fd number dropped a new source's
+registration. tools/bench/bench.php has a case per hot path (`all`; `embed-*` with
+examples/embedder loaded).
+
 ## How to build and test
 
 See README "Tests" and the previous commands:
@@ -142,8 +164,10 @@ patterns. Do not rebuild a target dir while a test run uses it.
    only, documented), ubuntu and macOS jobs.
 2. Integrate the embedding into danog/mongo-php-async-driver (separate step), then its workload
    benchmark.
-3. Performance passes (e.g. epoll_pwait2, avoiding the id-string allocation per callback,
-   caching `callee_of`); the `defer` case is dominated by PHP closure calls.
+3. Further performance (see "Optimisation pass"): an error fiber per error (Revolt's semantics:
+   a new Fiber, its stack mmap'd) dominates the error path; getSuspension() makes a new
+   suspension when PHP dropped the previous one (Revolt keeps it in a WeakMap while the fiber
+   lives).
 
 ## Open problems / notes
 

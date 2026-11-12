@@ -218,17 +218,24 @@ impl Drop for Record {
 
 /// The records of a driver: a slab (slots reused, no allocation per callback once warm; grown
 /// by chunks, so records never move) and the id => slot map for the operations by id (PHP
-/// passes id strings).
+/// passes id strings). After a burst (many callbacks, then few), the empty chunks at the end and
+/// the map's excess capacity are given back.
 #[derive(Default)]
 pub struct Records {
     chunks: Vec<Box<[Option<Record>; CHUNK]>>,
+    /// the records in each chunk (empty chunks are skipped by iterations)
+    live: Vec<u8>,
     /// slots never used yet start here
     fresh: u32,
     free: Vec<u32>,
     map: IdMap<u32>,
+    /// the free list's length that makes `remove` try to give memory back
+    compact_at: usize,
 }
 
 const CHUNK: usize = 64;
+/// below this many free slots nothing is given back
+const KEEP: usize = 4096;
 
 impl Records {
     #[inline(always)]
@@ -249,6 +256,7 @@ impl Records {
             None => {
                 if self.fresh as usize == self.chunks.len() * CHUNK {
                     self.chunks.push(Box::new(std::array::from_fn(|_| None)));
+                    self.live.push(0);
                 }
                 self.fresh += 1;
                 self.fresh - 1
@@ -256,6 +264,7 @@ impl Records {
         };
         r.slot = slot;
         self.map.insert(r.id, slot);
+        self.live[slot as usize / CHUNK] += 1;
         self.slot(slot).insert(r)
     }
 
@@ -293,7 +302,29 @@ impl Records {
     pub fn remove(&mut self, id: u64) -> Option<Record> {
         let slot = self.map.remove(&id)?;
         self.free.push(slot);
-        self.slot(slot).take()
+        self.live[slot as usize / CHUNK] -= 1;
+        let r = self.slot(slot).take();
+        let free = self.free.len();
+        if free > KEEP && (self.map.is_empty() || (free > self.compact_at && free > 4 * self.map.len())) {
+            self.compact();
+        }
+        r
+    }
+
+    /// Gives back the empty chunks at the end and the map's excess capacity (after a burst).
+    #[cold]
+    fn compact(&mut self) {
+        while self.live.last() == Some(&0) {
+            self.live.pop();
+            self.chunks.pop();
+        }
+        let end = (self.chunks.len() * CHUNK) as u32;
+        self.fresh = self.fresh.min(end);
+        self.free.retain(|&s| s < end);
+        self.free.shrink_to(self.free.len() * 2);
+        self.map.shrink_to(self.map.len() * 2);
+        // nothing more to give back until the free list doubles
+        self.compact_at = self.free.len() * 2;
     }
 
     pub fn len(&self) -> usize {
@@ -301,16 +332,17 @@ impl Records {
     }
 
     pub fn values(&self) -> impl Iterator<Item = &Record> {
-        self.chunks.iter().flat_map(|c| c.iter()).flatten()
+        self.chunks.iter().zip(&self.live).filter(|(_, &n)| n > 0).flat_map(|(c, _)| c.iter()).flatten()
     }
 
     pub fn values_mut(&mut self) -> impl Iterator<Item = &mut Record> {
-        self.chunks.iter_mut().flat_map(|c| c.iter_mut()).flatten()
+        self.chunks.iter_mut().zip(&self.live).filter(|(_, &n)| n > 0).flat_map(|(c, _)| c.iter_mut()).flatten()
     }
 
     pub fn clear(&mut self) {
         self.map.clear();
         self.free.clear();
+        self.live.clear();
         self.fresh = 0;
         // dropped in slot order (records may run release hooks)
         drop(std::mem::take(&mut self.chunks));
