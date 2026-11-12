@@ -671,10 +671,7 @@ pub fn run_main(d: D) -> Step {
             break Step::Exception;
         }
     };
-    unsafe {
-        let mut z = zval::obj_owned(d.0);
-        zval::dtor(&mut z);
-    }
+    unsafe { zval::obj_unref_pair(d.0) };
     step
 }
 
@@ -717,7 +714,7 @@ fn invoke_callbacks(d: D) -> Option<Step> {
         }
         d.c().yielded = null_mut();
         unsafe {
-            let mut hold = zval::obj_ref(f);
+            (*f).gc.refcount += 1;
             let r = if fiber::status(f) == fiber::STATUS_INIT {
                 fiber::start(f)
             } else {
@@ -730,7 +727,7 @@ fn invoke_callbacks(d: D) -> Option<Step> {
                 // the callback suspended (its Suspension owns the fiber now) or the fiber ended
                 c.callback_fiber.set(zval::undef());
             }
-            zval::dtor(&mut hold);
+            zval::obj_unref_pair(f);
         }
         if call::has_exception() {
             return Some(Step::Exception);

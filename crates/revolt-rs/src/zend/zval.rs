@@ -228,6 +228,26 @@ pub unsafe fn dtor(z: impl AsZ) {
     (*z).u1.type_info = UNDEF as u32;
 }
 
+/// Releases a reference to `o` taken for the duration of a call (a pair whose net effect is
+/// none): just a decrement while others remain, no possible-root buffering (whoever released the
+/// other references buffered it already if it may be garbage); the full release otherwise.
+#[inline(always)]
+pub unsafe fn obj_unref_pair(o: *mut sys::zend_object) {
+    if (*o).gc.refcount > 1 {
+        (*o).gc.refcount -= 1;
+    } else {
+        let mut z = obj_owned(o);
+        dtor(&mut z);
+    }
+}
+
+/// A zval borrowing `o` (no reference taken: never released, only passed to engine functions
+/// that read it).
+#[inline(always)]
+pub unsafe fn obj_borrowed(o: *mut sys::zend_object) -> Z {
+    obj_owned(o)
+}
+
 /// Releases and moves out: `*z` becomes UNDEF, the value is returned owned.
 #[inline(always)]
 pub unsafe fn take(z: impl AsZ) -> Z {
