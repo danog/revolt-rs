@@ -127,9 +127,14 @@ pub unsafe fn resume(o: *mut sys::zend_object, value: &mut zval::Z) -> Zv {
     call::method(o, b"resume", std::slice::from_mut(value))
 }
 
-/// $fiber->throw($exception)
+static mut THROW_FN: *mut sys::zend_function = null_mut();
+
+/// $fiber->throw($exception) (Fiber::throw() looked up once)
 pub unsafe fn throw_into(o: *mut sys::zend_object, ex: &mut zval::Z) -> Zv {
-    call::method(o, b"throw", std::slice::from_mut(ex))
+    if THROW_FN.is_null() {
+        THROW_FN = call::find_method(sys::zend_ce_fiber, b"throw");
+    }
+    call::call(&call::Callee { func: THROW_FN, obj: o, scope: (*o).ce }, std::slice::from_mut(ex), null_mut())
 }
 
 /// Fiber::suspend($value) from the running fiber: the value it is resumed with (UNDEF when an
