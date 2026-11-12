@@ -6,9 +6,14 @@ An extension written in Rust (a database driver, say) can embed revolt-rs as a l
   revolt/event-loop package, no `revolt` extension needed);
 - the extension drives the loop from Rust — fd watchers, timers, defers, suspensions — without
   any PHP-level call, whichever copy of revolt-rs registered the classes;
-- when the loop is not native (the PHP library is the implementation, the active driver is a
-  `TracingDriver`, a user `Driver` or a PHP subclass of `AbstractDriver`, or the owning copy is
-  incompatible), it falls back to calling `Revolt\EventLoop` through PHP, so it works everywhere.
+- the extension's own sockets can live in the loop's poller as *sources*: registered
+  edge-triggered once, their readiness handed to the extension in one batch per poll (no Revolt
+  callback per socket, no second poller);
+- the loop's driver is always native: `EventLoop::setDriver()` is refused (DIVERGENCES.md), so
+  PHP code and every embedder share that one loop;
+- when the classes are not revolt-rs's (the PHP library, if the embedder chose not to register
+  them) or the owning copy is incompatible, the embedder may fall back to calling
+  `Revolt\EventLoop` through PHP.
 
 [examples/embedder](examples/embedder/src/lib.rs) is a complete embedder (the extension
 `revolt_embed_example`) and [tests/embedder](tests/embedder/EmbedderTest.php) proves each case
@@ -33,6 +38,14 @@ copy registers nothing. There is one loop per PHP thread, the owner's, and every
 Within one major version the table only grows (new functions are appended, `abi_minor` goes up),
 so a newer copy can use an older owner's table only when it is large enough; drivers and
 suspensions cross the boundary as `zend_object` pointers, and everything runs inside the owner.
+
+| `abi_minor` | Added |
+|---|---|
+| 0 | the callbacks, suspensions, `hold`/`unhold` |
+| 1 | the sources (`src_group`, `src_close`, `src_reference`, `src_arm`, `src_disarm`, `src_forget`); `current` never returns a non-native driver (`setDriver()` is refused) |
+
+A copy of minor 1 or later finds an owner of minor 0 incompatible (its table is smaller): it
+must use the fallback, or do without the loop (the mongodb extension then blocks).
 
 Which extension owns the classes depends on the load order only; nothing else changes.
 `ReflectionClass::getExtensionName()` of `Revolt\EventLoop` names it.
@@ -82,8 +95,8 @@ Call revolt-rs's hooks from the extension's own (or build the whole entry with
 
 `revolt_rs::embed::NativeLoop::current()` returns the fast path for the calling thread's
 current driver (creating the default driver if there is none), or `None` (use the fallback; an
-exception may be pending if creating the driver failed). Fetch it again for every operation:
-`EventLoop::setDriver()` may replace the driver in between.
+exception may be pending if creating the driver failed). The driver is the same for the whole
+request (`setDriver()` is refused); a new request has a new one.
 
 | `NativeLoop` method | Revolt equivalent |
 |---|---|
@@ -128,14 +141,62 @@ nl.unhold();
 ```
 
 Why `hold`: while a fiber is suspended, a reference owned by a native frame is invisible to the
-cycle collector, so a fiber waiting on a driver that became garbage (say, replaced by
-`setDriver()`) could never be collected, where Revolt's PHP code would be. Held objects are
+cycle collector, so a fiber suspended in such a wait whose last references form a cycle (with
+the suspension, say) could never be collected, where Revolt's PHP code would be. Held objects are
 reported by the fiber itself, as its local variables are; when the collector destroys the fiber,
 `suspend()` returns with the unwind exception and the held objects are still there for the
 `cancel()`. Holds are LIFO per fiber.
 
 Raw fds bypass PHP's stream layer: data already in a PHP stream's read buffer is not seen (the
 PHP-level `onReadable()` reports such a stream readable at once).
+
+## Sources
+
+An embedder that does its own non-blocking socket I/O (a database driver: its connections,
+their reads and writes) can put those sockets in the driver's poller instead of making a Revolt
+callback per wait. A wait then costs no control call and no extra system call: the loop's one
+`epoll_wait()`/`kevent()` reports the socket, and a fiber or `{main}` waiting on it resumes.
+
+```rust
+let g = nl.src_group(take, flush, data);    // once per driver (one per request)
+// a wait, after the socket's read or write returned EAGAIN:
+let fds = [SrcFd { fd, events: SRC_READ as u32 }];
+if nl.src_arm(g, &fds, token)? {            // readiness seen earlier: retry the I/O now
+    return Ok(());
+}
+nl.src_reference(g, true);                  // while waits pend: the loop keeps running
+let s = nl.suspension();                    // suspend as in "Waiting" (hold it, ...)
+nl.suspend(s);                              // `flush` resumes it
+nl.src_disarm(&fds, token);
+// before closing the socket:
+nl.src_forget(fd);
+```
+
+- A source is registered with the kernel at its first `src_arm` and stays registered until
+  `src_forget` (call it before closing the fd: a new fd with the same number must be registered
+  anew) or until the group or the driver goes. Readiness is edge-triggered (Linux: `EPOLLET`
+  with `EPOLLIN|EPOLLOUT|EPOLLRDHUP`; kqueue: `EVFILT_READ` with `EV_CLEAR`, `EVFILT_WRITE`
+  one-shot per wait that wants it; Windows: an armed source is polled with WSAPoll, level-
+  triggered, only while armed). So arm a source only after its I/O returned EAGAIN (or right
+  after sending a request, before its reply can be there).
+- An event of a source that nobody waits for is kept as ready bits; the next `src_arm` of that
+  source for what was seen returns `Ok(true)` at once (consumed, nothing armed): retry the I/O
+  (it may find nothing: then arm again, which now waits).
+- During the loop's poll, `take(data, token)` is called for each event of an armed source
+  (`token`: what `src_arm` was given). It returns whether the waiter took it (false: it no
+  longer waits, e.g. it timed out but has not disarmed yet; the readiness is then kept as ready
+  bits). It must not call into the loop or PHP. A source is disarmed when its event is taken.
+- After that poll, `flush(data)` is called once per group whose `take` accepted something: it
+  resumes those waiters (`resume` of their suspensions: a fiber's resumes as a microtask, as
+  Revolt resumes fibers; `{main}`'s ends the loop's run). It runs in the loop's own context, not
+  in a callback fiber, so it must not suspend; it should call no PHP code.
+- `src_reference(g, true)` keeps the loop running (the driver's `isEmpty()` is false, `run()`
+  does not return) while the group has pending waits; unreference it when the last ends.
+- Groups and sources are not Revolt callbacks: `getIdentifiers()`, `getInfo()` and
+  `TracingDriver` do not see them.
+- A socket is a source or watched by callbacks (`on_readable`...), not both on one driver.
+- `fork()`: the child's poller is made anew; its sources are registered again at their next arm
+  (armed ones at once).
 
 ## The PHP-call fallback
 
@@ -149,9 +210,11 @@ The fallback is taken when `NativeLoop::current()` is `None`:
 - the classes are the PHP library's (the embedder used `minit_with(.., false)` or loaded after
   something that defined them; normally an embedder's MINIT registration keeps an installed
   revolt/event-loop package dormant);
-- the owning copy's table is incompatible (another ABI major, or smaller than this copy's);
-- the active driver is not a native revolt-rs driver: a `TracingDriver`, a user implementation
-  of `Driver`, or a PHP subclass of `AbstractDriver`.
+- the owning copy's table is incompatible (another ABI major, or smaller than this copy's).
+
+The loop's driver itself is always native: `EventLoop::setDriver()` is refused, so a
+`TracingDriver`, a user `Driver` or a PHP subclass of `AbstractDriver` never runs the loop (they
+still work when used directly).
 
 ## Composer
 
