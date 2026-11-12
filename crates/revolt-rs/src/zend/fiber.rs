@@ -286,7 +286,7 @@ pub mod inflight {
     /// The values of the last [`hold`] for `f` (null: {main}), owned by the caller again.
     #[inline]
     pub fn take(f: *mut sys::zend_object) -> Taken {
-        let mut out = Taken { len: 0, inline: unsafe { std::mem::zeroed() }, heap: Vec::new() };
+        let mut out = Taken { len: 0, inline: [const { std::mem::MaybeUninit::uninit() }; INLINE], heap: Vec::new() };
         unsafe {
             let fr = find(f as usize);
             if fr.is_null() {
@@ -297,7 +297,7 @@ pub mod inflight {
             let n = fr.vals.len() - start;
             out.len = n;
             if n <= INLINE {
-                std::ptr::copy_nonoverlapping(fr.vals.as_ptr().add(start), out.inline.as_mut_ptr(), n);
+                std::ptr::copy_nonoverlapping(fr.vals.as_ptr().add(start), out.inline.as_mut_ptr() as *mut zval::Z, n);
                 fr.vals.set_len(start);
             } else {
                 out.heap = fr.vals.split_off(start);
@@ -315,20 +315,33 @@ pub mod inflight {
     /// The values of a frame (owned: each is released explicitly, or left UNDEF).
     pub struct Taken {
         len: usize,
-        inline: [zval::Z; INLINE],
+        /// the first `len` are initialised when `len <= INLINE`
+        inline: [std::mem::MaybeUninit<zval::Z>; INLINE],
         heap: Vec<zval::Z>,
     }
 
     impl std::ops::Deref for Taken {
         type Target = [zval::Z];
+        #[inline(always)]
         fn deref(&self) -> &[zval::Z] {
-            if self.len <= INLINE { &self.inline[..self.len] } else { &self.heap }
+            if self.len <= INLINE {
+                // SAFETY: initialised up to len
+                unsafe { std::slice::from_raw_parts(self.inline.as_ptr() as *const zval::Z, self.len) }
+            } else {
+                &self.heap
+            }
         }
     }
 
     impl std::ops::DerefMut for Taken {
+        #[inline(always)]
         fn deref_mut(&mut self) -> &mut [zval::Z] {
-            if self.len <= INLINE { &mut self.inline[..self.len] } else { &mut self.heap }
+            if self.len <= INLINE {
+                // SAFETY: initialised up to len
+                unsafe { std::slice::from_raw_parts_mut(self.inline.as_mut_ptr() as *mut zval::Z, self.len) }
+            } else {
+                &mut self.heap
+            }
         }
     }
 
