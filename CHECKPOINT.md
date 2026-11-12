@@ -105,6 +105,22 @@ CI runners because of the OS's timer behaviour (the PHP library fails them too) 
 that CI only, through an env-gated list in tools/test.sh with the measured deviation as the
 reason, NOT in tests/NOT_APPLICABLE.md (which excludes everywhere).
 
+## Wait costs (2026-11-12, for the mongo driver's {main} waits)
+
+- b499dd4: a tick after callbacks that left nothing queued blocks at once (Revolt polls without
+  blocking first; with nothing queued nothing can run between the two polls). Not with PHP
+  overrides of activate()/dispatch()/now(), nor with PHP-buffered stream data (ordering).
+- 919552c: the wait timer is armed once per deadline: macOS keeps its EVFILT_TIMER/NOTE_CRITICAL
+  across polls (re-armed only for another deadline, deleted only before a wait without timeout);
+  Linux uses a timerfd (ABSTIME, CLOCK_MONOTONIC) in the epoll set, epoll_wait(-1): no per-wait
+  hrtimer, ns precision. fork children close the inherited timerfd
+  (ForkTest::testChildTimerDoesNotMoveTheParents fails without that on Linux).
+- 93ad155: polls no longer scan every fd (PHP-buffer check only with PHP-stream readers, refused
+  fds counted), fd map with the integer hasher.
+- Linux microbenchmark (TCP ping-pong, CPU us/op): blocking recv 6.17, epoll_wait(-1) 6.68,
+  epoll_wait with a timeout +0.3, nested epoll + drain 7.22, extra non-blocking poll +0.15.
+- tools/bench/bench.php: unchanged within noise.
+
 ## How to build and test
 
 See README "Tests" and the previous commands:

@@ -15,7 +15,9 @@ unchanged on a native loop.
 - **Native reactor:** epoll (Linux), kqueue (macOS, BSD), WSAPoll (Windows), for every driver
   class: no `stream_select()` limits, and no need for ext-ev, ext-event or ext-uv. Signals work
   without ext-pcntl. On macOS, timers fire on time (the system's timer coalescing delays
-  `usleep()`/`stream_select()` wake-ups by up to 10%).
+  `usleep()`/`stream_select()` wake-ups by up to 10%); on Linux to the nanosecond (a timerfd;
+  `epoll_wait()`'s own timeout has whole milliseconds). A wait for the same next timer as the
+  last one arms no kernel timer.
 - **Embeddable:** other Rust extensions can embed it (one loop per thread, whoever registered the
   classes) and drive the loop from Rust without PHP calls; see [EMBEDDING.md](EMBEDDING.md).
 - **Pure Rust:** no C libraries; the only C is the small `wrapper.c` of
