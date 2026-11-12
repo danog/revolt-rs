@@ -43,8 +43,9 @@ suspensions cross the boundary as `zend_object` pointers, and everything runs in
 |---|---|
 | 0 | the callbacks, suspensions, `hold`/`unhold` |
 | 1 | the sources (`src_group`, `src_close`, `src_reference`, `src_arm`, `src_disarm`, `src_forget`); `current` never returns a non-native driver (`setDriver()` is refused) |
+| 2 | `idle` |
 
-A copy of minor 1 or later finds an owner of minor 0 incompatible (its table is smaller): it
+A copy finds an owner of an older minor incompatible (its table is smaller): it
 must use the fallback, or do without the loop (the mongodb extension then blocks).
 
 Which extension owns the classes depends on the load order only; nothing else changes.
@@ -197,6 +198,18 @@ nl.src_forget(fd);
 - A socket is a source or watched by callbacks (`on_readable`...), not both on one driver.
 - `fork()`: the child's poller is made anew; its sources are registered again at their next arm
   (armed ones at once).
+
+### Idle loop: blocking instead of polling
+
+`NativeLoop::idle(except)` (O(1), no allocation) tells whether the loop has nothing to do: no
+enabled callback, referenced or not (watchers, timers, defers, signal watchers), other than
+`except` (one of the caller's own, e.g. a deadline timer that only serves its own waits; 0:
+none), nothing queued (callbacks, microtasks, callbacks to enable), no armed source (no fiber
+waits on one), no pending interrupt, and the loop not running. A `{main}` call that finds the
+loop idle (and has no waits of its own pending in fibers) can do its I/O blocking, exactly as
+without a loop: nothing else could run meanwhile, since only this thread runs PHP code and every
+way work can appear (a callback, a signal watcher, a fiber's wait) is counted. Check it again at
+each blocking step: a PHP callback the call itself runs (an APM subscriber, say) may add work.
 
 ## The PHP-call fallback
 
