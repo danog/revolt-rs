@@ -539,6 +539,11 @@ impl Reactor {
                 sleep(timeout);
                 return false;
             }
+            if timeout == Some(0.0) && self.fds.is_empty() && self.src.is_empty() && self.wake < 0 {
+                // nothing could be reported: no system call (an expired wait timer's event, if
+                // any, stays queued for the next wait)
+                return false;
+            }
             self.poll_os(timeout, deadline, out, &mut woke);
             woke
         }
