@@ -75,6 +75,12 @@ $pair = static fn () => stream_socket_pair(DIRECTORY_SEPARATOR === '\\' ? STREAM
 EventLoop::delay(0.01, static function () use ($b): void { fwrite($b, 'x'); });
 $out['src_wait'] = revolt_embed_example_src_wait($a);
 $out['src_read'] = fread($a, 1);
+// a {main} wait a flush ended leaves the loop where a callback's resume would: what is queued
+// afterwards runs at the next run()
+$queued = false;
+EventLoop::queue(static function () use (&$queued): void { $queued = true; });
+EventLoop::run();
+$out['queued_after_main_wait'] = $queued;
 // readiness the loop saw while nobody waited ends the next wait at once
 fwrite($b, 'y');
 EventLoop::delay(0.01, static function (): void {});

@@ -603,6 +603,12 @@ fn resume_loop_inner(d: D) -> Step {
                 if let Some(s) = invoke_callbacks(d) {
                     return s;
                 }
+                // an interrupt set outside the callback fiber (a source flush during dispatch)
+                // is taken as one set by a callback: the loop goes on with invokeCallbacks()
+                // when it resumes (what was queued meanwhile runs before the next isEmpty())
+                if let Some(i) = d.c().interrupt.take() {
+                    return Step::Interrupt(i);
+                }
                 d.c().phase = Phase::Top;
             }
             Phase::TickInvoke => {

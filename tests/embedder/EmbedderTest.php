@@ -67,6 +67,7 @@ final class EmbedderTest extends TestCase
         }
         self::assertSame($path, $r['src_wait']);
         self::assertSame('x', $r['src_read']);
+        self::assertTrue($r['queued_after_main_wait']);
         self::assertSame($path === 'native' ? 'ready' : $path, $r['src_ready']);
         self::assertSame('y', $r['src_read_ready']);
         self::assertSame([$path, $path, $path], $r['src_fibers']);
