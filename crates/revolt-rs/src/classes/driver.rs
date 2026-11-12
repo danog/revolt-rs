@@ -86,8 +86,30 @@ pub const OVR: &[(&str, u64)] = &[
     ("__debuginfo", 1 << 23),
 ];
 
-pub fn bit(lc: &str) -> u64 {
-    OVR.iter().find(|(n, _)| *n == lc).map(|x| x.1).unwrap_or(0)
+pub const fn bit(lc: &str) -> u64 {
+    let mut i = 0;
+    while i < OVR.len() {
+        let (n, b) = OVR[i];
+        if eq(n.as_bytes(), lc.as_bytes()) {
+            return b;
+        }
+        i += 1;
+    }
+    0
+}
+
+const fn eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut i = 0;
+    while i < a.len() {
+        if a[i] != b[i] {
+            return false;
+        }
+        i += 1;
+    }
+    true
 }
 
 unsafe fn user_method(ce: *mut sys::zend_class_entry, lc: &[u8]) -> Option<*mut sys::zend_function> {

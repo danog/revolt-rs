@@ -166,12 +166,9 @@ macro_rules! facade {
             if drv.is_null() {
                 return;
             }
-            if native_for(drv, bit($lc)) {
-                // the driver stays alive through the call (setDriver() may drop it)
-                (*drv).gc.refcount += 1;
+            if native_for(drv, const { bit($lc) }) {
+                // the thread's driver: alive until RSHUTDOWN (setDriver() is refused)
                 $imp(ex, rv, D(drv));
-                let mut z = zval::obj_owned(drv);
-                zval::dtor(&mut z);
             } else {
                 forward(ex, rv, drv, $lc.as_bytes(), $shape);
             }
