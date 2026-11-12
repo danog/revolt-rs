@@ -452,9 +452,29 @@ impl Reactor {
         }
     }
 
+    /// Arms the source `p` for the wait `token` in one lookup when it is registered already
+    /// and the wait needs no change in the poller (a write wait does on kqueue: `write_ok`
+    /// false); false otherwise (nothing done).
+    #[cfg(unix)]
+    #[inline]
+    fn src_rearm(&mut self, g: u32, p: &SrcFd, token: u64, write_ok: bool) -> bool {
+        let want = p.events as u8 & (READ | WRITE);
+        match self.src.get_mut(&p.fd) {
+            Some(e) if e.registered && (write_ok || want & WRITE == 0) => {
+                self.armed = self.armed + (want != 0) as usize - (e.want != 0) as usize;
+                *e = SrcEntry { group: g, registered: true, want, token, ..*e };
+                true
+            }
+            _ => false,
+        }
+    }
+
     /// Registers the source `p` with the poller if needed and arms it.
     #[cfg(target_os = "linux")]
     fn src_watch(&mut self, g: u32, p: &SrcFd, token: u64) -> Result<(), i32> {
+        if self.src_rearm(g, p, token, true) {
+            return Ok(());
+        }
         let registered = self.src.get(&p.fd).is_some_and(|e| e.registered);
         if !registered {
             if !self.ensure_poller() {
@@ -482,6 +502,10 @@ impl Reactor {
 
     #[cfg(all(unix, not(target_os = "linux")))]
     fn src_watch(&mut self, g: u32, p: &SrcFd, token: u64) -> Result<(), i32> {
+        // EVFILT_WRITE is one-shot per wait: a wait for it always makes a change
+        if self.src_rearm(g, p, token, false) {
+            return Ok(());
+        }
         let registered = self.src.get(&p.fd).is_some_and(|e| e.registered);
         let write = p.events as u8 & WRITE != 0;
         if !registered || write {
