@@ -19,7 +19,9 @@ unchanged on a native loop.
   `epoll_wait()`'s own timeout has whole milliseconds). A wait for the same next timer as the
   last one arms no kernel timer.
 - **Embeddable:** other Rust extensions can embed it (one loop per thread, whoever registered the
-  classes) and drive the loop from Rust without PHP calls; see [EMBEDDING.md](EMBEDDING.md).
+  classes) and drive the loop from Rust without PHP calls, their own sockets registered
+  edge-triggered in the loop's poller and handed to them in batches; see
+  [EMBEDDING.md](EMBEDDING.md).
 - **Pure Rust:** no C libraries; the only C is the small `wrapper.c` of
   [ext-php-rs](https://github.com/extphprs/ext-php-rs), the Zend Engine bindings. PHP 8.2 to
   8.6, NTS and ZTS (each PHP thread has its own loop).
