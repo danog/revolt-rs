@@ -306,7 +306,9 @@ pub enum Interrupt {
 }
 
 pub enum Microtask {
-    Php { closure: Zv, args: Vec<Zv>, named: Zv },
+    /// the closure, its named arguments (an array, or UNDEF) and the number of its positional
+    /// ones, which wait in `Core::microtask_args` (in queue order: no allocation per microtask)
+    Php { closure: Zv, nargs: u32, named: Zv },
     /// DriverSuspension::resume()/throw() of a fiber suspension
     Resume { fiber: Zv, value: Zv, throw: bool },
     Native { f: NativeFn, data: *mut c_void },
@@ -373,6 +375,8 @@ pub struct Core {
     /// tick() found no PHP-buffered stream data just before the blocking poll it leads to
     pub buffers_checked: bool,
     pub microtasks: VecDeque<Microtask>,
+    /// the positional arguments of the queued PHP microtasks, back to back in queue order
+    pub microtask_args: VecDeque<Zv>,
     pub error_handler: Zv,
     pub interrupt: Option<Interrupt>,
     pub idle: bool,
@@ -422,6 +426,7 @@ impl Core {
             scratch: Vec::new(),
             buffers_checked: false,
             microtasks: VecDeque::new(),
+            microtask_args: VecDeque::new(),
             error_handler: Zv::null(),
             interrupt: None,
             idle: false,
@@ -461,13 +466,13 @@ impl Core {
                 std::mem::forget(z);
             }
         }
+        for a in self.microtask_args.iter_mut() {
+            add(&mut *a.0);
+        }
         for t in self.microtasks.iter_mut() {
             match t {
-                Microtask::Php { closure, args, named } => {
+                Microtask::Php { closure, named, .. } => {
                     add(&mut *closure.0);
-                    for a in args.iter_mut() {
-                        add(&mut *a.0);
-                    }
                     add(&mut *named.0);
                 }
                 Microtask::Resume { fiber, value, .. } => {
@@ -694,6 +699,7 @@ impl Drop for Core {
         // release the records (and their native data) before the reactor goes
         self.callbacks.clear();
         self.microtasks.clear();
+        self.microtask_args.clear();
         self.suspensions.clear();
     }
 }

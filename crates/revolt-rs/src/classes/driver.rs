@@ -311,13 +311,13 @@ pub unsafe fn queue_d(ex: Ex, _rv: *mut sys::zval, d: D) {
 /// queue($closure, ...$args) with the frame's arguments (named ones included).
 pub unsafe fn push_microtask(d: D, ex: Ex, closure: *mut sys::zend_object) {
     let n = call::num_args(ex) as usize;
-    let mut args = Vec::with_capacity(n.saturating_sub(1));
+    let c = d.c();
     for i in 1..n {
-        args.push(Zv(zval::copy_deref(call::arg(ex, i))));
+        c.microtask_args.push_back(Zv(zval::copy_deref(call::arg(ex, i))));
     }
     let named_ht = call::extra_named(ex);
     let named = if named_ht.is_null() { Zv::undef() } else { Zv(zval::arr_owned(sys::zend_array_dup(named_ht))) };
-    d.c().microtasks.push_back(Microtask::Php { closure: Zv(zval::obj_ref(closure)), args, named });
+    c.microtasks.push_back(Microtask::Php { closure: Zv(zval::obj_ref(closure)), nargs: n.saturating_sub(1) as u32, named });
 }
 
 pub unsafe extern "C" fn defer(ex: Ex, rv: *mut sys::zval) {
