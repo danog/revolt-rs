@@ -226,7 +226,7 @@ pub unsafe fn mixed_closure(ex: Ex) -> Option<(*mut sys::zval, *mut sys::zend_ob
 #[inline(always)]
 pub unsafe fn ret_id(rv: *mut sys::zval, d: D, id: u64) {
     if let Some(r) = d.c().record(id) {
-        zval::write(rv, zval::str_ref(r.id_str));
+        zval::write(rv, zval::str_ref(r.id_zstr()));
     }
 }
 
@@ -524,7 +524,7 @@ pub unsafe fn get_identifiers_d(ex: Ex, rv: *mut sys::zval, d: D) {
     let ids = c.ids();
     let arr = hash::new(ids.len() as u32);
     for id in ids {
-        hash::push(arr, zval::str_ref(c.record(id).unwrap().id_str));
+        hash::push(arr, zval::str_ref(c.record(id).unwrap().id_zstr()));
     }
     zval::write(rv, zval::arr_owned(arr));
 }
@@ -546,7 +546,7 @@ pub unsafe fn debug_info_d(ex: Ex, rv: *mut sys::zval, d: D) {
         hash::set_str(e, b"type", zval::obj_ref(type_case(r.kind)));
         hash::set_str(e, b"enabled", zval::bool(r.enabled));
         hash::set_str(e, b"referenced", zval::bool(r.referenced));
-        hash::set_zstr(arr, r.id_str, zval::arr_owned(e));
+        hash::set_zstr(arr, r.id_zstr(), zval::arr_owned(e));
     }
     zval::write(rv, zval::arr_owned(arr));
 }
@@ -664,7 +664,12 @@ pub unsafe extern "C" fn enqueue_callback(ex: Ex, _rv: *mut sys::zval) {
     }
     let id = super::callbacks::view_id((*z).value.obj);
     if id != 0 {
-        D(call::this(ex)).c().enqueue(id);
+        let c = D(call::this(ex)).c();
+        match c.record(id).map(|r| r.cid()) {
+            Some(cid) => c.enqueue(cid),
+            // a callback that is gone would be skipped when its turn came
+            None => c.idle = false,
+        }
     }
 }
 

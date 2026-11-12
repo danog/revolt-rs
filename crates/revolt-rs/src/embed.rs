@@ -215,7 +215,7 @@ unsafe extern "C" fn abi_src_forget(d: *mut sys::zend_object, fd: i64) {
 unsafe extern "C" fn abi_idle(d: *mut sys::zend_object, except: u64) -> bool {
     let c = D(d).c();
     let mut n = c.enabled_n;
-    if n == 1 && except != 0 && c.callbacks.get(&except).is_some_and(|r| r.enabled) {
+    if n == 1 && except != 0 && c.callbacks.get_ref(except).is_some_and(|r| r.enabled) {
         n = 0;
     }
     n == 0

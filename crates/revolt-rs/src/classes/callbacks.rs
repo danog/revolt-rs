@@ -220,7 +220,7 @@ pub unsafe fn view(d: D, id: u64) -> *mut sys::zend_object {
     obj::set_prop(o, s.invokable, zval::bool(r.invokable));
     obj::set_prop(o, s.enabled, zval::bool(r.enabled));
     obj::set_prop(o, s.referenced, zval::bool(r.referenced));
-    obj::set_prop(o, s.id, zval::str_ref(r.id_str));
+    obj::set_prop(o, s.id, zval::str_ref(r.id_zstr()));
     if let Cb::Php { closure, .. } = &r.cb {
         obj::set_prop(o, s.closure, zval::copy(&closure.0));
     }

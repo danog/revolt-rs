@@ -55,15 +55,34 @@ pub type IdMap<V> = HashMap<u64, V, BuildHasherDefault<IdHasher>>;
 
 /// Revolt's callback ids are "a", "b", ..., "z", "aa", ... (str_increment from "a"): bijective
 /// base 26, so a number stands for each id. 1 is "a".
-pub fn id_to_string(mut n: u64) -> Vec<u8> {
-    let mut s = Vec::with_capacity(4);
+pub fn id_to_string(n: u64) -> Vec<u8> {
+    id_bytes(n).as_bytes().to_vec()
+}
+
+/// An id's string without allocating (at most 14 letters: u64::MAX in bijective base 26).
+pub struct IdBuf {
+    buf: [u8; 14],
+    start: usize,
+}
+
+impl IdBuf {
+    #[inline]
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.buf[self.start..]
+    }
+}
+
+/// [`id_to_string`] on the stack.
+#[inline]
+pub fn id_bytes(mut n: u64) -> IdBuf {
+    let mut b = IdBuf { buf: [0; 14], start: 14 };
     while n > 0 {
         n -= 1;
-        s.push(b'a' + (n % 26) as u8);
+        b.start -= 1;
+        b.buf[b.start] = b'a' + (n % 26) as u8;
         n /= 26;
     }
-    s.reverse();
-    s
+    b
 }
 
 /// The number of an id string; None for strings that are no id (never valid identifiers).
@@ -113,10 +132,22 @@ impl Drop for Cb {
     }
 }
 
+/// A callback's id and the slot of its record (valid while `records.at_id()` finds it: a slot is
+/// reused by later records, ids never are).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Cid {
+    pub id: u64,
+    pub slot: u32,
+}
+
 /// DriverCallback (and its subclasses) as a Rust record.
 pub struct Record {
     pub id: u64,
-    pub id_str: *mut sys::zend_string,
+    /// its slot in the record table
+    pub slot: u32,
+    /// the id's string, made when first needed (PHP callbacks: at once, it is returned; native
+    /// ones: only if PHP code asks); null until then
+    id_str: *mut sys::zend_string,
     pub kind: Kind,
     pub cb: Cb,
     /// StreamCallback::$stream
@@ -141,6 +172,20 @@ pub struct Record {
 }
 
 impl Record {
+    #[inline(always)]
+    pub fn cid(&self) -> Cid {
+        Cid { id: self.id, slot: self.slot }
+    }
+
+    /// The id's string (borrowed: owned by the record).
+    #[inline]
+    pub fn id_zstr(&mut self) -> *mut sys::zend_string {
+        if self.id_str.is_null() {
+            self.id_str = unsafe { zstr::new(id_bytes(self.id).as_bytes()) };
+        }
+        self.id_str
+    }
+
     pub fn closure_obj(&self) -> *mut sys::zend_object {
         match &self.cb {
             Cb::Php { closure, .. } => closure.obj(),
@@ -152,12 +197,94 @@ impl Record {
 impl Drop for Record {
     fn drop(&mut self) {
         unsafe {
-            zstr::release(self.id_str);
+            if !self.id_str.is_null() {
+                zstr::release(self.id_str);
+            }
             if !self.view.is_null() {
                 let mut z = zval::obj_owned(self.view);
                 zval::dtor(&mut z);
             }
         }
+    }
+}
+
+/// The records of a driver: a slab (slots reused, no allocation per callback once warm) and the
+/// id => slot map for the operations by id (PHP passes id strings).
+#[derive(Default)]
+pub struct Records {
+    slots: Vec<Option<Record>>,
+    free: Vec<u32>,
+    map: IdMap<u32>,
+}
+
+impl Records {
+    /// Stores a record (its `slot` is set); returns it.
+    pub fn insert(&mut self, mut r: Record) -> &mut Record {
+        let slot = match self.free.pop() {
+            Some(s) => s,
+            None => {
+                self.slots.push(None);
+                (self.slots.len() - 1) as u32
+            }
+        };
+        r.slot = slot;
+        self.map.insert(r.id, slot);
+        self.slots[slot as usize].insert(r)
+    }
+
+    #[inline]
+    pub fn get(&mut self, id: u64) -> Option<&mut Record> {
+        let slot = *self.map.get(&id)?;
+        self.slots[slot as usize].as_mut()
+    }
+
+    #[inline]
+    pub fn get_ref(&self, id: u64) -> Option<&Record> {
+        let slot = *self.map.get(&id)?;
+        self.slots[slot as usize].as_ref()
+    }
+
+    /// The record of `c` if it still exists (no lookup).
+    #[inline(always)]
+    pub fn at_id(&mut self, c: Cid) -> Option<&mut Record> {
+        match self.slots.get_mut(c.slot as usize) {
+            Some(Some(r)) if r.id == c.id => Some(r),
+            _ => None,
+        }
+    }
+
+    /// The record in `slot` (which must hold one).
+    #[inline(always)]
+    pub fn at(&mut self, slot: u32) -> &mut Record {
+        // SAFETY of the unwrap: callers pass slots of live records (the timer heap's)
+        self.slots[slot as usize].as_mut().unwrap()
+    }
+
+    pub fn remove(&mut self, id: u64) -> Option<Record> {
+        let slot = self.map.remove(&id)?;
+        let r = self.slots[slot as usize].take();
+        self.free.push(slot);
+        r
+    }
+
+    pub fn len(&self) -> usize {
+        self.map.len()
+    }
+
+    pub fn values(&self) -> impl Iterator<Item = &Record> {
+        self.slots.iter().flatten()
+    }
+
+    pub fn values_mut(&mut self) -> impl Iterator<Item = &mut Record> {
+        self.slots.iter_mut().flatten()
+    }
+
+    pub fn clear(&mut self) {
+        self.map.clear();
+        self.free.clear();
+        // dropped in slot order (records may run release hooks)
+        let slots = std::mem::take(&mut self.slots);
+        drop(slots);
     }
 }
 
@@ -230,13 +357,21 @@ pub struct Core {
     pub kind: DriverKind,
     pub hooks: Hooks,
     pub next_id: u64,
-    pub callbacks: IdMap<Box<Record>>,
-    /// $enableQueue / $enableDeferQueue: (id, generation) in order; stale entries skipped
-    pub enable_queue: Vec<(u64, u32)>,
+    pub callbacks: Records,
+    /// $enableQueue / $enableDeferQueue: (callback, generation) in order; stale entries skipped
+    pub enable_queue: Vec<(Cid, u32)>,
     pub enable_queue_len: usize,
-    pub defer_queue: Vec<(u64, u32)>,
+    pub defer_queue: Vec<(Cid, u32)>,
     pub defer_queue_len: usize,
-    pub callback_queue: VecDeque<u64>,
+    /// a drained enable queue (its buffer kept: no allocation per tick)
+    pub spare_queue: Vec<(Cid, u32)>,
+    pub callback_queue: VecDeque<Cid>,
+    /// tick()'s buffer of drained enable queues (kept: no allocation per tick)
+    pub tick_buf: Vec<Cid>,
+    /// a scratch buffer of dispatch()
+    pub scratch: Vec<Cid>,
+    /// tick() found no PHP-buffered stream data just before the blocking poll it leads to
+    pub buffers_checked: bool,
     pub microtasks: VecDeque<Microtask>,
     pub error_handler: Zv,
     pub interrupt: Option<Interrupt>,
@@ -276,12 +411,16 @@ impl Core {
             kind,
             hooks: Hooks::default(),
             next_id: 1,
-            callbacks: IdMap::default(),
+            callbacks: Records::default(),
             enable_queue: Vec::new(),
             enable_queue_len: 0,
             defer_queue: Vec::new(),
             defer_queue_len: 0,
+            spare_queue: Vec::new(),
             callback_queue: VecDeque::new(),
+            tick_buf: Vec::new(),
+            scratch: Vec::new(),
+            buffers_checked: false,
             microtasks: VecDeque::new(),
             error_handler: Zv::null(),
             interrupt: None,
@@ -360,10 +499,12 @@ impl Core {
     pub fn new_record(&mut self, kind: Kind, cb: Cb) -> &mut Record {
         let id = self.next_id;
         self.next_id += 1;
-        let s = id_to_string(id);
-        let rec = Box::new(Record {
+        self.live += 1;
+        self.enabled_n += 1;
+        self.callbacks.insert(Record {
             id,
-            id_str: unsafe { zstr::new(&s) },
+            slot: 0,
+            id_str: null_mut(),
             kind,
             cb,
             stream: Zv::undef(),
@@ -379,95 +520,122 @@ impl Core {
             active: false,
             heap_pos: usize::MAX,
             view: null_mut(),
-        });
-        self.live += 1;
-        self.enabled_n += 1;
-        self.callbacks.entry(id).or_insert(rec)
+        })
     }
 
     #[inline]
     pub fn record(&mut self, id: u64) -> Option<&mut Record> {
-        self.callbacks.get_mut(&id).map(|b| &mut **b)
+        self.callbacks.get(id)
     }
 
     /// Adds to $enableQueue (or $enableDeferQueue for defers).
-    pub fn queue_enable(&mut self, id: u64) {
-        let Some(r) = self.callbacks.get_mut(&id) else { return };
+    pub fn queue_enable(&mut self, c: Cid) {
+        let Some(r) = self.callbacks.at_id(c) else { return };
         r.queued = true;
         r.qgen = r.qgen.wrapping_add(1);
-        let entry = (id, r.qgen);
-        if r.kind == Kind::Defer {
-            self.defer_queue.push(entry);
-            self.defer_queue_len += 1;
-        } else {
-            self.enable_queue.push(entry);
-            self.enable_queue_len += 1;
+        let entry = (r.cid(), r.qgen);
+        let (q, len) = if r.kind == Kind::Defer { (&mut self.defer_queue, &mut self.defer_queue_len) } else { (&mut self.enable_queue, &mut self.enable_queue_len) };
+        q.push(entry);
+        *len += 1;
+        if q.len() > 2 * *len + 32 {
+            // mostly entries of callbacks unqueued since (disable/enable churn): dropped, so
+            // that the queue does not grow with them
+            let recs = &mut self.callbacks;
+            q.retain(|&(c, g)| recs.at_id(c).is_some_and(|r| r.queued && r.qgen == g));
         }
     }
 
-    /// unset($this->enableQueue[$id]) / unset($this->enableDeferQueue[$id])
-    pub fn unqueue_enable(&mut self, id: u64) -> bool {
-        let Some(r) = self.callbacks.get_mut(&id) else { return false };
+    /// unset($this->enableQueue[$id]) / unset($this->enableDeferQueue[$id]) of `r` (counted).
+    #[inline]
+    fn unqueue(r: &mut Record, enable_len: &mut usize, defer_len: &mut usize) -> bool {
         if !r.queued {
             return false;
         }
         r.queued = false;
         if r.kind == Kind::Defer {
-            self.defer_queue_len -= 1;
+            *defer_len -= 1;
         } else {
-            self.enable_queue_len -= 1;
+            *enable_len -= 1;
         }
         true
     }
 
-    /// Drains an enable queue: the ids still queued, in order (marked not queued).
-    pub fn take_queue(&mut self, defer: bool) -> Vec<u64> {
+    /// unset($this->enableQueue[$id]) / unset($this->enableDeferQueue[$id])
+    pub fn unqueue_enable(&mut self, id: u64) -> bool {
+        let Some(r) = self.callbacks.get(id) else { return false };
+        Self::unqueue(r, &mut self.enable_queue_len, &mut self.defer_queue_len)
+    }
+
+    /// Drains an enable queue into `out` (cleared first): the callbacks still queued, in order
+    /// (marked not queued).
+    pub fn take_queue(&mut self, defer: bool, out: &mut Vec<Cid>) {
+        out.clear();
         let q = if defer { &mut self.defer_queue } else { &mut self.enable_queue };
         if q.is_empty() {
-            // every tick: nothing to take, nothing to free
-            return Vec::new();
+            return;
         }
-        let q = std::mem::take(q);
+        // the queue's buffer and the spare one swap: neither is freed
+        let mut entries = std::mem::replace(q, std::mem::take(&mut self.spare_queue));
         if defer {
             self.defer_queue_len = 0;
         } else {
             self.enable_queue_len = 0;
         }
-        let mut out = Vec::with_capacity(q.len());
-        for (id, g) in q {
-            if let Some(r) = self.callbacks.get_mut(&id) {
+        for &(c, g) in &entries {
+            if let Some(r) = self.callbacks.at_id(c) {
                 if r.queued && r.qgen == g {
                     r.queued = false;
-                    out.push(id);
+                    out.push(c);
                 }
             }
         }
-        out
+        entries.clear();
+        self.spare_queue = entries;
+    }
+
+    /// The enabled flag of `r`, counted (and written through to its view).
+    #[inline]
+    fn enabled(r: &mut Record, on: bool, live: &mut usize, enabled_n: &mut usize) {
+        if r.enabled == on {
+            return;
+        }
+        r.enabled = on;
+        if on {
+            *enabled_n += 1;
+            if r.referenced {
+                *live += 1;
+            }
+        } else {
+            *enabled_n -= 1;
+            if r.referenced {
+                *live -= 1;
+            }
+        }
+        view_set_bool(r.view, ViewProp::Enabled, on);
     }
 
     pub fn set_enabled(&mut self, id: u64, on: bool) {
-        if let Some(r) = self.callbacks.get_mut(&id) {
-            if r.enabled != on {
-                r.enabled = on;
-                if on {
-                    self.enabled_n += 1;
-                } else {
-                    self.enabled_n -= 1;
-                }
-                if r.referenced {
-                    if on {
-                        self.live += 1;
-                    } else {
-                        self.live -= 1;
-                    }
-                }
-                view_set_bool(r.view, ViewProp::Enabled, on);
-            }
+        if let Some(r) = self.callbacks.get(id) {
+            Self::enabled(r, on, &mut self.live, &mut self.enabled_n);
         }
     }
 
+    /// disable()'s bookkeeping in one lookup: the record is disabled, not invokable and not
+    /// queued. Some((kind, was queued)) when it was enabled; None otherwise (or unknown).
+    pub fn disable_record(&mut self, id: u64) -> Option<(Kind, bool)> {
+        let r = self.callbacks.get(id)?;
+        if !r.enabled {
+            return None;
+        }
+        Self::enabled(r, false, &mut self.live, &mut self.enabled_n);
+        r.invokable = false;
+        view_set_bool(r.view, ViewProp::Invokable, false);
+        let was_queued = Self::unqueue(r, &mut self.enable_queue_len, &mut self.defer_queue_len);
+        Some((r.kind, was_queued))
+    }
+
     pub fn set_referenced(&mut self, id: u64, on: bool) {
-        if let Some(r) = self.callbacks.get_mut(&id) {
+        if let Some(r) = self.callbacks.get(id) {
             if r.referenced != on {
                 r.referenced = on;
                 if r.enabled {
@@ -483,15 +651,15 @@ impl Core {
     }
 
     pub fn set_invokable(&mut self, id: u64, on: bool) {
-        if let Some(r) = self.callbacks.get_mut(&id) {
+        if let Some(r) = self.callbacks.get(id) {
             r.invokable = on;
             view_set_bool(r.view, ViewProp::Invokable, on);
         }
     }
 
     /// unset($this->callbacks[$id]) (after disable()).
-    pub fn remove(&mut self, id: u64) -> Option<Box<Record>> {
-        let mut r = self.callbacks.remove(&id)?;
+    pub fn remove(&mut self, id: u64) -> Option<Record> {
+        let mut r = self.callbacks.remove(id)?;
         if r.enabled && r.referenced {
             self.live -= 1;
         }
@@ -508,14 +676,14 @@ impl Core {
 
     /// enqueueCallback()
     #[inline]
-    pub fn enqueue(&mut self, id: u64) {
-        self.callback_queue.push_back(id);
+    pub fn enqueue(&mut self, c: Cid) {
+        self.callback_queue.push_back(c);
         self.idle = false;
     }
 
     /// The ids of all callbacks, in creation order (getIdentifiers()).
     pub fn ids(&self) -> Vec<u64> {
-        let mut v: Vec<u64> = self.callbacks.keys().copied().collect();
+        let mut v: Vec<u64> = self.callbacks.values().map(|r| r.id).collect();
         v.sort_unstable();
         v
     }

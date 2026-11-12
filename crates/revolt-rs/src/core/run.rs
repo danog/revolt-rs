@@ -4,7 +4,7 @@
 //! A `D` is a driver object; `d.c()` is its Core. A `&mut Core` is never kept across a call into
 //! PHP (which may re-enter the driver): it is fetched again after each call.
 
-use super::{backend, clock, Cb, Core, Desc, Interrupt, Kind, Microtask, Phase};
+use super::{backend, clock, Cb, Cid, Core, Desc, Interrupt, Kind, Microtask, Phase};
 use crate::classes;
 use crate::zend::{self, call, fiber, hash, stream, sys, zstr, zval, zval::Zv};
 use std::ptr::null_mut;
@@ -60,9 +60,9 @@ pub unsafe fn php_cb(closure: *mut sys::zend_object) -> Cb {
 
 pub fn defer(d: D, cb: Cb) -> u64 {
     let c = d.c();
-    let id = c.new_record(Kind::Defer, cb).id;
-    c.queue_enable(id);
-    id
+    let r = c.new_record(Kind::Defer, cb).cid();
+    c.queue_enable(r);
+    r.id
 }
 
 /// delay()/repeat(): None when now() threw.
@@ -72,18 +72,18 @@ pub fn timer(d: D, interval: f64, cb: Cb, repeat: bool) -> Option<u64> {
     let r = c.new_record(if repeat { Kind::Repeat } else { Kind::Delay }, cb);
     r.interval = interval;
     r.expiration = now + interval;
-    let id = r.id;
-    c.queue_enable(id);
-    Some(id)
+    let r = r.cid();
+    c.queue_enable(r);
+    Some(r.id)
 }
 
 pub fn stream(d: D, stream: Zv, cb: Cb, writable: bool) -> u64 {
     let c = d.c();
     let r = c.new_record(if writable { Kind::Writable } else { Kind::Readable }, cb);
     r.stream = stream;
-    let id = r.id;
-    c.queue_enable(id);
-    id
+    let r = r.cid();
+    c.queue_enable(r);
+    r.id
 }
 
 /// onReadable/onWritable on a raw OS handle (embedding API): no PHP stream.
@@ -92,18 +92,18 @@ pub fn stream_handle(d: D, h: stream::Handle, cb: Cb, writable: bool) -> u64 {
     let r = c.new_record(if writable { Kind::Writable } else { Kind::Readable }, cb);
     r.handle = Some(h);
     r.stream = Zv::null();
-    let id = r.id;
-    c.queue_enable(id);
-    id
+    let r = r.cid();
+    c.queue_enable(r);
+    r.id
 }
 
 pub fn signal(d: D, sig: i32, cb: Cb) -> u64 {
     let c = d.c();
     let r = c.new_record(Kind::Signal, cb);
     r.signal = sig;
-    let id = r.id;
-    c.queue_enable(id);
-    id
+    let r = r.cid();
+    c.queue_enable(r);
+    r.id
 }
 
 /// enable(): false when the id is invalid (the caller throws InvalidCallbackError); None when
@@ -114,12 +114,12 @@ pub fn enable(d: D, id: u64) -> Option<bool> {
     if r.enabled {
         return Some(true);
     }
-    let kind = r.kind;
+    let (kind, cid) = (r.kind, r.cid());
     c.set_enabled(id, true);
     if kind == Kind::Delay || kind == Kind::Repeat {
         let now = now(d)?;
         let c = d.c();
-        if let Some(r) = c.record(id) {
+        if let Some(r) = c.callbacks.at_id(cid) {
             r.expiration = now + r.interval;
             let (v, e) = (r.view, r.expiration);
             if !v.is_null() {
@@ -127,28 +127,17 @@ pub fn enable(d: D, id: u64) -> Option<bool> {
             }
         }
     }
-    d.c().queue_enable(id);
+    d.c().queue_enable(cid);
     Some(true)
 }
 
 /// disable(): false when deactivate() threw.
 pub fn disable(d: D, id: u64) -> bool {
-    let c = d.c();
-    let Some(r) = c.record(id) else { return true };
-    if !r.enabled {
-        return true;
+    match d.c().disable_record(id) {
+        // unknown, disabled already, only queued to be enabled, or a defer
+        None | Some((_, true)) | Some((Kind::Defer, false)) => true,
+        Some(_) => deactivate(d, id),
     }
-    c.set_enabled(id, false);
-    c.set_invokable(id, false);
-    if c.unqueue_enable(id) {
-        // only queued to be enabled
-        return true;
-    }
-    let kind = c.record(id).map(|r| r.kind);
-    if kind == Some(Kind::Defer) {
-        return true;
-    }
-    deactivate(d, id)
 }
 
 /// cancel(): $this->disable() (a userland override is called), then forgotten.
@@ -188,13 +177,11 @@ pub fn unreference(d: D, id: u64) {
 fn id_zstr(d: D, id: u64) -> *mut sys::zend_string {
     match d.c().record(id) {
         Some(r) => {
-            unsafe { zstr::addref(r.id_str) };
-            r.id_str
+            let s = r.id_zstr();
+            unsafe { zstr::addref(s) };
+            s
         }
-        None => {
-            let s = super::id_to_string(id);
-            unsafe { zstr::new(&s) }
-        }
+        None => unsafe { zstr::new(super::id_bytes(id).as_bytes()) },
     }
 }
 
@@ -240,18 +227,18 @@ pub fn v_enable(d: D, id: u64) -> bool {
 // ---------------------------------------------------------------- activation (the reactor)
 
 /// activate($callbacks): false when it threw (the callbacks not activated go back to the queue).
-fn activate(d: D, ids: &[u64]) -> bool {
+fn activate(d: D, ids: &[Cid]) -> bool {
     let c = d.c();
     if let Some(f) = c.hooks.activate {
         unsafe {
             let arr = hash::new(ids.len() as u32);
-            for &id in ids {
-                let v = classes::callbacks::view(d, id);
+            for &cid in ids {
+                let v = classes::callbacks::view(d, cid.id);
                 if v.is_null() {
                     continue;
                 }
-                let r = d.c().record(id).unwrap();
-                hash::set_zstr(arr, r.id_str, zval::obj_ref(v));
+                let r = d.c().callbacks.at_id(cid).unwrap();
+                hash::set_zstr(arr, r.id_zstr(), zval::obj_ref(v));
             }
             let mut a = zval::arr_owned(arr);
             let _ = call::call(&call::Callee { func: f, obj: d.0, scope: (*d.0).ce }, std::slice::from_mut(&mut a), null_mut());
@@ -261,16 +248,16 @@ fn activate(d: D, ids: &[u64]) -> bool {
                 return false;
             }
             let c = d.c();
-            for &id in ids {
-                if let Some(r) = c.record(id) {
+            for &cid in ids {
+                if let Some(r) = c.callbacks.at_id(cid) {
                     r.active = true;
                 }
             }
         }
         return true;
     }
-    for (i, &id) in ids.iter().enumerate() {
-        if let Err(e) = activate_native(c, id) {
+    for (i, &cid) in ids.iter().enumerate() {
+        if let Err(e) = activate_native(c, cid) {
             requeue(c, &ids[i..]);
             unsafe { e.throw() };
             return false;
@@ -279,10 +266,10 @@ fn activate(d: D, ids: &[u64]) -> bool {
     true
 }
 
-fn requeue(c: &mut Core, ids: &[u64]) {
-    for &id in ids {
-        if c.record(id).is_some_and(|r| r.enabled && !r.queued) {
-            c.queue_enable(id);
+fn requeue(c: &mut Core, ids: &[Cid]) {
+    for &cid in ids {
+        if c.callbacks.at_id(cid).is_some_and(|r| r.enabled && !r.queued) {
+            c.queue_enable(cid);
         }
     }
 }
@@ -294,15 +281,23 @@ pub enum ActivateError {
 
 /// activate() of one callback (a native driver's activate() called from PHP).
 pub fn activate_one(d: D, id: u64) -> Result<(), ActivateError> {
-    activate_native(d.c(), id)
+    let c = d.c();
+    match c.record(id).map(|r| r.cid()) {
+        Some(cid) => activate_native(c, cid),
+        None => Ok(()),
+    }
 }
 
 /// deactivate() of one callback (a native driver's deactivate() called from PHP).
 pub fn deactivate_one(d: D, id: u64) {
-    let c = d.c();
-    if let Some(mut r) = c.callbacks.remove(&id) {
-        deactivate_record(c, &mut r);
-        c.callbacks.insert(id, r);
+    deactivate_id(d.c(), id);
+}
+
+/// Deactivates the record `id` in place.
+fn deactivate_id(c: &mut Core, id: u64) {
+    if let Some(r) = c.callbacks.get(id) {
+        let d = deactivation(r);
+        deactivate_apply(c, d);
     }
 }
 
@@ -336,7 +331,7 @@ impl ActivateError {
     unsafe fn throw(&self) {
         match self {
             ActivateError::Stream(id) => {
-                let s = String::from_utf8_lossy(&super::id_to_string(*id)).into_owned();
+                let s = String::from_utf8_lossy(super::id_bytes(*id).as_bytes()).into_owned();
                 call::throw(sys::zend_ce_type_error, &format!("Invalid stream for callback {s}: not a valid stream resource (closed, or not a stream)"));
             }
             ActivateError::Signal(errno, msg) => {
@@ -346,8 +341,9 @@ impl ActivateError {
     }
 }
 
-fn activate_native(c: &mut Core, id: u64) -> Result<(), ActivateError> {
-    let Some(r) = c.callbacks.get_mut(&id) else { return Ok(()) };
+fn activate_native(c: &mut Core, cid: Cid) -> Result<(), ActivateError> {
+    let id = cid.id;
+    let Some(r) = c.callbacks.at_id(cid) else { return Ok(()) };
     if r.active {
         return Ok(());
     }
@@ -363,19 +359,19 @@ fn activate_native(c: &mut Core, id: u64) -> Result<(), ActivateError> {
             };
             let dir = if r.kind == Kind::Readable { backend::READ } else { backend::WRITE };
             r.active = true;
-            c.reactor.add(h.fd, h.socket, h.res, id, dir);
+            c.reactor.add(h.fd, h.socket, h.res, cid, dir);
             if dir == backend::READ && !zval::is_null(&r.stream.0) {
                 c.reactor.stream_readers += 1;
             }
         }
         Kind::Delay | Kind::Repeat => {
             r.active = true;
-            c.timers.insert(&mut c.callbacks, id);
+            c.timers.insert(&mut c.callbacks, cid.slot);
         }
         Kind::Signal => {
             let sig = r.signal;
-            c.signals.add(sig, id).map_err(|(e, m)| ActivateError::Signal(e, m))?;
-            c.callbacks.get_mut(&id).unwrap().active = true;
+            c.signals.add(sig, cid).map_err(|(e, m)| ActivateError::Signal(e, m))?;
+            c.callbacks.at(cid.slot).active = true;
             c.reactor.set_wake(c.signals.wake_fd());
         }
         Kind::Defer => {}
@@ -401,40 +397,66 @@ fn deactivate(d: D, id: u64) -> bool {
             return !call::has_exception();
         }
     }
-    if let Some(mut r) = c.callbacks.remove(&id) {
-        deactivate_record(c, &mut r);
-        c.callbacks.insert(id, r);
-    }
+    deactivate_id(c, id);
     true
 }
 
-fn deactivate_record(c: &mut Core, r: &mut super::Record) {
+/// What taking a record out of the reactor takes (computed from the record, then applied to the
+/// reactor: no borrow of the record meanwhile).
+enum Deactivation {
+    None,
+    Fd { fd: i64, id: u64, dir: u8, php_reader: bool },
+    Timer { pos: usize },
+    Signal { sig: i32, id: u64 },
+}
+
+/// Marks `r` inactive; what remains to be done in the reactor.
+fn deactivation(r: &mut super::Record) -> Deactivation {
     if !r.active {
-        return;
+        return Deactivation::None;
     }
     r.active = false;
     match r.kind {
-        Kind::Readable | Kind::Writable => {
-            if let Some(h) = r.handle {
-                c.reactor.del(h.fd, r.id, if r.kind == Kind::Readable { backend::READ } else { backend::WRITE });
-                if r.kind == Kind::Readable && !zval::is_null(&r.stream.0) {
-                    c.reactor.stream_readers -= 1;
-                }
+        Kind::Readable | Kind::Writable => match r.handle {
+            Some(h) => Deactivation::Fd {
+                fd: h.fd,
+                id: r.id,
+                dir: if r.kind == Kind::Readable { backend::READ } else { backend::WRITE },
+                php_reader: r.kind == Kind::Readable && !zval::is_null(&r.stream.0),
+            },
+            None => Deactivation::None,
+        },
+        Kind::Delay | Kind::Repeat if r.heap_pos != usize::MAX => {
+            let pos = r.heap_pos;
+            r.heap_pos = usize::MAX;
+            Deactivation::Timer { pos }
+        }
+        Kind::Signal => Deactivation::Signal { sig: r.signal, id: r.id },
+        _ => Deactivation::None,
+    }
+}
+
+fn deactivate_apply(c: &mut Core, d: Deactivation) {
+    match d {
+        Deactivation::None => {}
+        Deactivation::Fd { fd, id, dir, php_reader } => {
+            c.reactor.del(fd, id, dir);
+            if php_reader {
+                c.reactor.stream_readers -= 1;
             }
         }
-        Kind::Delay | Kind::Repeat => {
-            if r.heap_pos != usize::MAX {
-                let pos = r.heap_pos;
-                r.heap_pos = usize::MAX;
-                c.timers.remove(&mut c.callbacks, pos);
-            }
-        }
-        Kind::Signal => {
-            c.signals.remove(r.signal, r.id);
+        Deactivation::Timer { pos } => c.timers.remove(&mut c.callbacks, pos),
+        Deactivation::Signal { sig, id } => {
+            c.signals.remove(sig, id);
             c.reactor.set_wake(c.signals.wake_fd());
         }
-        Kind::Defer => {}
     }
+}
+
+/// Takes `r` (removed from the table: its heap position was cleared then) out of the reactor.
+fn deactivate_record(c: &mut Core, r: &mut super::Record) {
+    let d = deactivation(r);
+    deactivate_apply(c, d);
 }
 
 // ---------------------------------------------------------------- dispatch
@@ -460,16 +482,19 @@ fn dispatch_native(c: &mut Core, mut blocking: bool) {
         enqueue_signals(c, &delivered);
         blocking = false;
     }
-    if blocking {
-        let mut buffered = buffered_readers(c);
+    if blocking && !std::mem::take(&mut c.buffers_checked) {
+        let mut buffered = std::mem::take(&mut c.scratch);
+        buffered_readers(c, &mut buffered);
         if !buffered.is_empty() {
-            buffered.sort_unstable();
-            for id in buffered {
-                c.enqueue(id);
+            buffered.sort_unstable_by_key(|r| r.id);
+            for &cid in &buffered {
+                c.enqueue(cid);
             }
             blocking = false;
         }
+        c.scratch = buffered;
     }
+    c.buffers_checked = false;
     let deadline = if blocking { c.timers.peek() } else { None };
     let timeout = if blocking { deadline.map(|e| (e - clock::now()).max(0.0)) } else { Some(0.0) };
     let mut ready = std::mem::take(&mut c.ready_buf);
@@ -480,14 +505,10 @@ fn dispatch_native(c: &mut Core, mut blocking: bool) {
     for &(fd, rd, wr) in &ready {
         let Some(e) = c.reactor.fds.get(&fd) else { continue };
         if rd {
-            for &id in &e.readers {
-                c.callback_queue.push_back(id);
-            }
+            c.callback_queue.extend(e.readers.iter().copied());
         }
         if wr {
-            for &id in &e.writers {
-                c.callback_queue.push_back(id);
-            }
+            c.callback_queue.extend(e.writers.iter().copied());
         }
         if rd || wr {
             c.idle = false;
@@ -502,37 +523,52 @@ fn dispatch_native(c: &mut Core, mut blocking: bool) {
         let delivered = c.signals.take_delivered();
         enqueue_signals(c, &delivered);
     }
-    let now = clock::now();
-    while let Some(id) = c.timers.pop_expired(&mut c.callbacks, now) {
-        c.enqueue(id);
+    if c.timers.len() > 0 {
+        let now = clock::now();
+        while let Some(cid) = c.timers.pop_expired(&mut c.callbacks, now) {
+            c.enqueue(cid);
+        }
     }
 }
 
+/// Whether `r` is a readable callback of a stream with data in PHP's read buffer.
+#[inline]
+fn is_buffered(r: &mut super::Record) -> bool {
+    !zval::is_null(&r.stream.0) && unsafe { stream::has_buffered(&mut *r.stream.0) }
+}
+
 /// The readable callbacks of streams with data in PHP's read buffers (stream_select reports
-/// such streams readable at once).
-fn buffered_readers(c: &mut Core) -> Vec<u64> {
-    let mut buffered = Vec::new();
+/// such streams readable at once), into `out` (cleared first).
+fn buffered_readers(c: &mut Core, out: &mut Vec<Cid>) {
+    out.clear();
     if c.reactor.stream_readers == 0 {
         // only raw handles (embedders' sockets): no PHP buffers
-        return buffered;
+        return;
     }
     for e in c.reactor.fds.values() {
-        for &id in &e.readers {
-            if let Some(r) = c.callbacks.get_mut(&id) {
-                if !zval::is_null(&r.stream.0) && unsafe { stream::has_buffered(&mut *r.stream.0) } {
-                    buffered.push(id);
-                }
+        for &cid in &e.readers {
+            if c.callbacks.at_id(cid).is_some_and(is_buffered) {
+                out.push(cid);
             }
         }
     }
-    buffered
+}
+
+/// Whether some readable callback's stream has data in PHP's read buffer.
+fn any_buffered(c: &mut Core) -> bool {
+    if c.reactor.stream_readers == 0 {
+        return false;
+    }
+    let recs = &mut c.callbacks;
+    c.reactor.fds.values().any(|e| e.readers.iter().any(|&cid| recs.at_id(cid).is_some_and(is_buffered)))
 }
 
 fn enqueue_signals(c: &mut Core, sigs: &[i32]) {
     for s in sigs {
         if let Some(ids) = c.signals.by_signal.get(s) {
-            for &id in ids.clone().iter() {
-                c.enqueue(id);
+            if !ids.is_empty() {
+                c.callback_queue.extend(ids.iter().copied());
+                c.idle = false;
             }
         }
     }
@@ -542,18 +578,29 @@ fn enqueue_signals(c: &mut Core, sigs: &[i32]) {
 
 /// tick(): activation and the first half; returns the next phase, or None when it threw.
 fn tick(d: D, previous_idle: bool) -> Option<Phase> {
-    let ids = d.c().take_queue(false);
-    if !activate(d, &ids) {
+    // the tick's buffer (taken: activate() may call PHP, which may tick a nested loop)
+    let mut ids = std::mem::take(&mut d.c().tick_buf);
+    d.c().take_queue(false, &mut ids);
+    if !ids.is_empty() && !activate(d, &ids) {
+        d.c().tick_buf = ids;
         return None;
     }
     let c = d.c();
-    for &id in &ids {
-        c.set_invokable(id, true);
+    for &cid in &ids {
+        if let Some(r) = c.callbacks.at_id(cid) {
+            r.invokable = true;
+            super::view_set_bool(r.view, super::ViewProp::Invokable, true);
+        }
     }
-    for id in c.take_queue(true) {
-        c.set_invokable(id, true);
-        c.enqueue(id);
+    c.take_queue(true, &mut ids);
+    for &cid in &ids {
+        if let Some(r) = c.callbacks.at_id(cid) {
+            r.invokable = true;
+            super::view_set_bool(r.view, super::ViewProp::Invokable, true);
+        }
+        c.enqueue(cid);
     }
+    c.tick_buf = ids;
     // Revolt polls without blocking after a tick that ran callbacks, then blocks in the next
     // tick if that poll found nothing. With nothing queued now, nothing can run between those
     // two polls, so one blocking poll gives the same result (it returns at once for what the
@@ -567,7 +614,9 @@ fn tick(d: D, previous_idle: bool) -> Option<Phase> {
         && h.activate.is_none()
         && h.dispatch.is_none()
         && h.now.is_none()
-        && buffered_readers(c).is_empty();
+        && !any_buffered(c);
+    // the blocking poll this leads to (nothing runs before it) need not look again
+    c.buffers_checked = quiet;
     let blocking = (previous_idle || quiet) && !c.stopped && c.live > 0;
     if blocking {
         c.tick_blocking = true;
@@ -773,8 +822,8 @@ unsafe extern "C" fn callback_fiber_body(ex: call::Ex, _rv: *mut sys::zval) {
             return;
         }
         loop {
-            let Some(id) = d.c().callback_queue.pop_front() else { break };
-            if !invoke_callback(d, id) {
+            let Some(cid) = d.c().callback_queue.pop_front() else { break };
+            if !invoke_callback(d, cid) {
                 return;
             }
             if d.c().interrupt.is_some() && !suspend_marker(d) {
@@ -791,9 +840,10 @@ unsafe extern "C" fn callback_fiber_body(ex: call::Ex, _rv: *mut sys::zval) {
 }
 
 /// One callback of the queue; false when the fiber must end.
-unsafe fn invoke_callback(d: D, id: u64) -> bool {
+unsafe fn invoke_callback(d: D, cid: Cid) -> bool {
+    let id = cid.id;
     let c = d.c();
-    let Some(r) = c.record(id) else { return true };
+    let Some(r) = c.callbacks.at_id(cid) else { return true };
     if !r.invokable {
         return true;
     }
@@ -814,6 +864,7 @@ unsafe fn invoke_callback(d: D, id: u64) -> bool {
         Cb::Taken => return true,
     };
     let fiber = zend::active_fiber();
+    let id_str = if let Cb::Php { .. } = r.cb { r.id_zstr() } else { null_mut() };
     let callee = if let Cb::Php { closure, callee } = &r.cb {
         // what the call needs, kept even if the callback is cancelled before it runs; held where
         // the cycle collector sees it (the callback fiber's frames, in Revolt)
@@ -822,7 +873,9 @@ unsafe fn invoke_callback(d: D, id: u64) -> bool {
             Kind::Signal => Some(zval::long(r.signal as i64)),
             _ => None,
         };
-        fiber::inflight::hold(fiber, [zval::copy(&*closure.0), zval::str_ref(r.id_str)].into_iter().chain(third));
+        let closure = zval::copy(&*closure.0);
+        let id_str = zval::str_ref(id_str);
+        fiber::inflight::hold(fiber, [closure, id_str].into_iter().chain(third));
         Some(*callee)
     } else {
         None

@@ -106,8 +106,8 @@ pub fn minit() {
 
 #[derive(Default)]
 pub struct FdEntry {
-    pub readers: Vec<u64>,
-    pub writers: Vec<u64>,
+    pub readers: Vec<super::Cid>,
+    pub writers: Vec<super::Cid>,
     /// interest registered with the poller
     registered: u8,
     /// the poller refused the fd: reported ready on every poll
@@ -238,7 +238,7 @@ impl Reactor {
         !self.fds.is_empty() || self.wake >= 0
     }
 
-    pub fn add(&mut self, fd: i64, socket: bool, res: i64, id: u64, dir: u8) {
+    pub fn add(&mut self, fd: i64, socket: bool, res: i64, id: super::Cid, dir: u8) {
         let e = self.fds.entry(fd).or_default();
         e.socket = socket;
         if e.want() == 0 || e.res != res {
@@ -264,7 +264,7 @@ impl Reactor {
     pub fn del(&mut self, fd: i64, id: u64, dir: u8) {
         let Some(e) = self.fds.get_mut(&fd) else { return };
         let list = if dir == READ { &mut e.readers } else { &mut e.writers };
-        if let Some(p) = list.iter().position(|&x| x == id) {
+        if let Some(p) = list.iter().position(|x| x.id == id) {
             list.remove(p);
         }
         if !e.dirty {

@@ -85,8 +85,8 @@ mod imp {
     /// The signal watchers of one loop.
     #[derive(Default)]
     pub struct Watchers {
-        /// signal => callback ids, in activation order
-        pub by_signal: HashMap<i32, Vec<u64>>,
+        /// signal => callbacks, in activation order
+        pub by_signal: HashMap<i32, Vec<crate::core::Cid>>,
         seen: HashMap<i32, u64>,
         pipe: Option<(i32, i32)>,
         slot: Option<usize>,
@@ -95,7 +95,7 @@ mod imp {
 
     impl Watchers {
         /// Watches `sig` for callback `id`; Err((errno, message)) when it cannot be.
-        pub fn add(&mut self, sig: i32, id: u64) -> Result<(), (i32, String)> {
+        pub fn add(&mut self, sig: i32, id: crate::core::Cid) -> Result<(), (i32, String)> {
             self.ensure_pipe().map_err(|e| (e, std::io::Error::from_raw_os_error(e).to_string()))?;
             if !self.by_signal.contains_key(&sig) {
                 install(sig).map_err(|e| (e, std::io::Error::from_raw_os_error(e).to_string()))?;
@@ -107,7 +107,7 @@ mod imp {
 
         pub fn remove(&mut self, sig: i32, id: u64) {
             let Some(v) = self.by_signal.get_mut(&sig) else { return };
-            if let Some(p) = v.iter().position(|&x| x == id) {
+            if let Some(p) = v.iter().position(|x| x.id == id) {
                 v.remove(p);
             }
             if v.is_empty() {
@@ -212,11 +212,11 @@ mod imp {
     /// Windows: no signals (onSignal() throws UnsupportedFeatureException before this is used).
     #[derive(Default)]
     pub struct Watchers {
-        pub by_signal: HashMap<i32, Vec<u64>>,
+        pub by_signal: HashMap<i32, Vec<crate::core::Cid>>,
     }
 
     impl Watchers {
-        pub fn add(&mut self, _sig: i32, _id: u64) -> Result<(), (i32, String)> {
+        pub fn add(&mut self, _sig: i32, _id: crate::core::Cid) -> Result<(), (i32, String)> {
             Err((0, "Signal handling is not supported on Windows".into()))
         }
         pub fn remove(&mut self, _sig: i32, _id: u64) {}
