@@ -140,7 +140,8 @@ pub struct Cid {
     pub slot: u32,
 }
 
-/// DriverCallback (and its subclasses) as a Rust record.
+/// DriverCallback (and its subclasses) as a Rust record. Kept within 128 bytes (two cache lines,
+/// asserted below): what only one kind of callback uses goes in `watch`.
 pub struct Record {
     pub id: u64,
     /// its slot in the record table
@@ -150,13 +151,8 @@ pub struct Record {
     id_str: *mut sys::zend_string,
     pub kind: Kind,
     pub cb: Cb,
-    /// StreamCallback::$stream
-    pub stream: Zv,
-    /// the OS handle behind `stream`, resolved at activation
-    pub handle: Option<Handle>,
-    pub signal: i32,
-    pub interval: f64,
-    pub expiration: f64,
+    /// what the callback waits for (the data of its kind)
+    pub watch: Watch,
     pub enabled: bool,
     pub invokable: bool,
     pub referenced: bool,
@@ -165,10 +161,28 @@ pub struct Record {
     pub qgen: u32,
     /// activated in the reactor (fd registered / timer in the heap / signal watched)
     pub active: bool,
-    /// its index in the reactor's `php_readers` (u32::MAX: not there)
-    pub reader_idx: u32,
     /// the DriverCallback object handed to PHP code (userland drivers), or null
     pub view: *mut sys::zend_object,
+}
+
+const _: () = assert!(size_of::<Record>() <= 128);
+const _: () = assert!(size_of::<Option<Record>>() <= 128);
+
+/// The data of a callback's kind.
+pub enum Watch {
+    Defer,
+    /// Delay, Repeat
+    Timer { interval: f64, expiration: f64 },
+    /// Readable, Writable
+    Stream {
+        /// StreamCallback::$stream (null: a raw OS handle of the embedding API)
+        stream: Zv,
+        /// the OS handle behind `stream`, resolved at activation
+        handle: Option<Handle>,
+        /// its index in the reactor's `php_readers` (u32::MAX: not there)
+        reader_idx: u32,
+    },
+    Signal(i32),
 }
 
 impl Record {
@@ -525,7 +539,9 @@ impl Core {
                 Cb::Native { held, .. } => add(&mut *held.0),
                 Cb::Taken => {}
             }
-            add(&mut *r.stream.0);
+            if let Watch::Stream { stream, .. } = &mut r.watch {
+                add(&mut *stream.0);
+            }
             if !r.view.is_null() {
                 let mut z = unsafe { zval::obj_owned(r.view) };
                 add(&mut *z);
@@ -569,7 +585,7 @@ impl Core {
     }
 
     /// A new record with the next id.
-    pub fn new_record(&mut self, kind: Kind, cb: Cb) -> &mut Record {
+    pub fn new_record(&mut self, kind: Kind, cb: Cb, watch: Watch) -> &mut Record {
         let id = self.next_id;
         self.next_id += 1;
         self.live += 1;
@@ -580,18 +596,13 @@ impl Core {
             id_str: null_mut(),
             kind,
             cb,
-            stream: Zv::undef(),
-            handle: None,
-            signal: 0,
-            interval: 0.0,
-            expiration: 0.0,
+            watch,
             enabled: true,
             invokable: false,
             referenced: true,
             queued: false,
             qgen: 0,
             active: false,
-            reader_idx: u32::MAX,
             view: null_mut(),
         })
     }

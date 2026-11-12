@@ -134,7 +134,8 @@ StreamSelectDriver in the baseline run); NOT_APPLICABLE.md takes `Class::*`;
 
 Hot paths without needless work; per-change notes in the commits (953891b..HEAD). Main points:
 records in a chunked slab addressed by slot (Cid) from every queue, fd/signal list and the timer
-heap (4-ary, positions in a dense array); no allocation per defer/queue/delay/repeat/suspend/
+heap (4-ary, positions in a dense array); a record is 128 bytes (was 152; asserted at compile time:
+the data of one kind only is in the `Watch` enum); no allocation per defer/queue/delay/repeat/suspend/
 resume in steady state (DHAT: e.g. queue 3 -> 0, suspend-fiber 6 -> 1 = the bench's own closure);
 in-flight values in reused per-fiber frames; inline zval/string releases; refcount pairs without
 root buffering; macOS kevent64 (a non-waiting poll: 12 µs -> 0.15 µs); a dense list of PHP-stream

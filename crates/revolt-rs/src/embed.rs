@@ -109,7 +109,7 @@ unsafe fn native_cb(f: NativeFn, data: *mut c_void, release: Option<ReleaseFn>, 
 }
 
 unsafe extern "C" fn abi_on_handle(d: *mut sys::zend_object, fd: i64, socket: bool, writable: bool, f: NativeFn, data: *mut c_void, release: Option<ReleaseFn>, held: *mut sys::zend_object) -> u64 {
-    run::stream_handle(D(d), Handle { fd, socket, res: 0 }, native_cb(f, data, release, held), writable)
+    run::stream_handle(D(d), Handle { fd, socket }, native_cb(f, data, release, held), writable)
 }
 
 unsafe extern "C" fn abi_timer(d: *mut sys::zend_object, secs: f64, repeat: bool, f: NativeFn, data: *mut c_void, release: Option<ReleaseFn>, held: *mut sys::zend_object) -> u64 {

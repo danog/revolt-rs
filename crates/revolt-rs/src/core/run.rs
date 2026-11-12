@@ -4,7 +4,7 @@
 //! A `D` is a driver object; `d.c()` is its Core. A `&mut Core` is never kept across a call into
 //! PHP (which may re-enter the driver): it is fetched again after each call.
 
-use super::{backend, clock, Cb, Cid, Core, Desc, Interrupt, Kind, Microtask, Phase};
+use super::{backend, clock, Cb, Cid, Core, Desc, Interrupt, Kind, Microtask, Phase, Watch};
 use crate::classes;
 use crate::zend::{self, call, fiber, hash, stream, sys, zstr, zval, zval::Zv};
 use std::ptr::null_mut;
@@ -60,7 +60,7 @@ pub unsafe fn php_cb(closure: *mut sys::zend_object) -> Cb {
 
 pub fn defer(d: D, cb: Cb) -> u64 {
     let c = d.c();
-    let r = c.new_record(Kind::Defer, cb).cid();
+    let r = c.new_record(Kind::Defer, cb, Watch::Defer).cid();
     c.queue_enable(r);
     r.id
 }
@@ -69,19 +69,16 @@ pub fn defer(d: D, cb: Cb) -> u64 {
 pub fn timer(d: D, interval: f64, cb: Cb, repeat: bool) -> Option<u64> {
     let now = now(d)?;
     let c = d.c();
-    let r = c.new_record(if repeat { Kind::Repeat } else { Kind::Delay }, cb);
-    r.interval = interval;
-    r.expiration = now + interval;
-    let r = r.cid();
+    let watch = Watch::Timer { interval, expiration: now + interval };
+    let r = c.new_record(if repeat { Kind::Repeat } else { Kind::Delay }, cb, watch).cid();
     c.queue_enable(r);
     Some(r.id)
 }
 
 pub fn stream(d: D, stream: Zv, cb: Cb, writable: bool) -> u64 {
     let c = d.c();
-    let r = c.new_record(if writable { Kind::Writable } else { Kind::Readable }, cb);
-    r.stream = stream;
-    let r = r.cid();
+    let watch = Watch::Stream { stream, handle: None, reader_idx: u32::MAX };
+    let r = c.new_record(if writable { Kind::Writable } else { Kind::Readable }, cb, watch).cid();
     c.queue_enable(r);
     r.id
 }
@@ -89,19 +86,15 @@ pub fn stream(d: D, stream: Zv, cb: Cb, writable: bool) -> u64 {
 /// onReadable/onWritable on a raw OS handle (embedding API): no PHP stream.
 pub fn stream_handle(d: D, h: stream::Handle, cb: Cb, writable: bool) -> u64 {
     let c = d.c();
-    let r = c.new_record(if writable { Kind::Writable } else { Kind::Readable }, cb);
-    r.handle = Some(h);
-    r.stream = Zv::null();
-    let r = r.cid();
+    let watch = Watch::Stream { stream: Zv::null(), handle: Some(h), reader_idx: u32::MAX };
+    let r = c.new_record(if writable { Kind::Writable } else { Kind::Readable }, cb, watch).cid();
     c.queue_enable(r);
     r.id
 }
 
 pub fn signal(d: D, sig: i32, cb: Cb) -> u64 {
     let c = d.c();
-    let r = c.new_record(Kind::Signal, cb);
-    r.signal = sig;
-    let r = r.cid();
+    let r = c.new_record(Kind::Signal, cb, Watch::Signal(sig)).cid();
     c.queue_enable(r);
     r.id
 }
@@ -114,16 +107,15 @@ pub fn enable(d: D, id: u64) -> Option<bool> {
     if r.enabled {
         return Some(true);
     }
-    let (kind, cid) = (r.kind, r.cid());
+    let (timer, cid) = (matches!(r.watch, Watch::Timer { .. }), r.cid());
     c.set_enabled(id, true);
-    if kind == Kind::Delay || kind == Kind::Repeat {
+    if timer {
         let now = now(d)?;
         let c = d.c();
-        if let Some(r) = c.callbacks.at_id(cid) {
-            r.expiration = now + r.interval;
-            let (v, e) = (r.view, r.expiration);
-            if !v.is_null() {
-                unsafe { classes::callbacks::view_write(v, super::ViewProp::Expiration, zval::double(e)) };
+        if let Some(super::Record { watch: Watch::Timer { interval, expiration }, view, .. }) = c.callbacks.at_id(cid) {
+            *expiration = now + *interval;
+            if !view.is_null() {
+                unsafe { classes::callbacks::view_write(*view, super::ViewProp::Expiration, zval::double(*expiration)) };
             }
         }
     }
@@ -387,36 +379,37 @@ fn activate_native(c: &mut Core, cid: Cid) -> Result<(), ActivateError> {
     if r.active {
         return Ok(());
     }
-    match r.kind {
-        Kind::Readable | Kind::Writable => {
-            let h = match r.handle {
-                Some(h) if zval::is_null(&r.stream.0) => h,
+    match &mut r.watch {
+        Watch::Stream { stream, handle, reader_idx } => {
+            let dir = if r.kind == Kind::Readable { backend::READ } else { backend::WRITE };
+            let php = !zval::is_null(&stream.0);
+            let h = match *handle {
+                Some(h) if !php => h,
                 _ => {
-                    let h = unsafe { stream::handle(&mut *r.stream.0) }.ok_or(ActivateError::Stream(id))?;
-                    r.handle = Some(h);
+                    let h = unsafe { stream::handle(&mut *stream.0) }.ok_or(ActivateError::Stream(id))?;
+                    *handle = Some(h);
                     h
                 }
             };
-            let dir = if r.kind == Kind::Readable { backend::READ } else { backend::WRITE };
+            let res = if php { unsafe { stream::resource(&mut *stream.0) } } else { null_mut() };
+            let res_handle = if res.is_null() { 0 } else { unsafe { (*res).handle as i64 } };
             r.active = true;
-            c.reactor.add(h.fd, h.socket, h.res, cid, dir);
-            if dir == backend::READ && !zval::is_null(&r.stream.0) {
-                let res = unsafe { stream::resource(&mut *r.stream.0) };
-                r.reader_idx = c.reactor.php_readers.len() as u32;
+            c.reactor.add(h.fd, h.socket, res_handle, cid, dir);
+            if dir == backend::READ && php {
+                *reader_idx = c.reactor.php_readers.len() as u32;
                 c.reactor.php_readers.push((cid, res));
             }
         }
-        Kind::Delay | Kind::Repeat => {
+        Watch::Timer { expiration, .. } => {
             r.active = true;
-            c.timers.insert(cid, r.expiration);
+            c.timers.insert(cid, *expiration);
         }
-        Kind::Signal => {
-            let sig = r.signal;
+        &mut Watch::Signal(sig) => {
             c.signals.add(sig, cid).map_err(|(e, m)| ActivateError::Signal(e, m))?;
             c.callbacks.at(cid.slot).active = true;
             c.reactor.set_wake(c.signals.wake_fd());
         }
-        Kind::Defer => {}
+        Watch::Defer => {}
     }
     Ok(())
 }
@@ -458,18 +451,15 @@ fn deactivation(r: &mut super::Record) -> Deactivation {
         return Deactivation::None;
     }
     r.active = false;
-    match r.kind {
-        Kind::Readable | Kind::Writable => match r.handle {
-            Some(h) => Deactivation::Fd {
-                fd: h.fd,
-                id: r.id,
-                dir: if r.kind == Kind::Readable { backend::READ } else { backend::WRITE },
-                php_reader: std::mem::replace(&mut r.reader_idx, u32::MAX),
-            },
-            None => Deactivation::None,
+    match &mut r.watch {
+        Watch::Stream { handle: Some(h), reader_idx, .. } => Deactivation::Fd {
+            fd: h.fd,
+            id: r.id,
+            dir: if r.kind == Kind::Readable { backend::READ } else { backend::WRITE },
+            php_reader: std::mem::replace(reader_idx, u32::MAX),
         },
-        Kind::Delay | Kind::Repeat => Deactivation::Timer { slot: r.slot },
-        Kind::Signal => Deactivation::Signal { sig: r.signal, id: r.id },
+        Watch::Timer { .. } => Deactivation::Timer { slot: r.slot },
+        &mut Watch::Signal(sig) => Deactivation::Signal { sig, id: r.id },
         _ => Deactivation::None,
     }
 }
@@ -483,8 +473,8 @@ fn deactivate_apply(c: &mut Core, d: Deactivation) {
                 let rs = &mut c.reactor.php_readers;
                 rs.swap_remove(php_reader as usize);
                 if let Some(&(moved, _)) = rs.get(php_reader as usize) {
-                    if let Some(m) = c.callbacks.at_id(moved) {
-                        m.reader_idx = php_reader;
+                    if let Some(Watch::Stream { reader_idx, .. }) = c.callbacks.at_id(moved).map(|m| &mut m.watch) {
+                        *reader_idx = php_reader;
                     }
                 }
             }
@@ -912,9 +902,9 @@ unsafe fn invoke_callback(d: D, cid: Cid) -> bool {
     } else if let Cb::Php { closure, callee } = &r.cb {
         // what the call needs, kept even if the callback is cancelled before it runs; held where
         // the cycle collector sees it (the callback fiber's frames, in Revolt)
-        let third = match kind {
-            Kind::Readable | Kind::Writable => Some(zval::copy(&*r.stream.0)),
-            Kind::Signal => Some(zval::long(r.signal as i64)),
+        let third = match &r.watch {
+            Watch::Stream { stream, .. } => Some(zval::copy(&*stream.0)),
+            &Watch::Signal(sig) => Some(zval::long(sig as i64)),
             _ => None,
         };
         let closure = zval::copy(&*closure.0);

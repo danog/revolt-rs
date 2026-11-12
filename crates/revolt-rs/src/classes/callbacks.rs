@@ -5,7 +5,7 @@
 use super::{arg as a, arg_default as ad, method as m, Ces, F_PRI as PRI, F_PUB as PUB};
 use super::{T_A, T_B, T_CL, T_F, T_I, T_MIX, T_NEVER, T_S, T_V};
 use crate::core::run::D;
-use crate::core::{Cb, Kind, ViewProp};
+use crate::core::{Cb, Kind, ViewProp, Watch};
 use crate::zend::class::{self as k, c, Default as Dv, NONE};
 use crate::zend::{call, call::Ex, hash, obj, sys, zstr, zval};
 use crate::{zh, zpp};
@@ -224,15 +224,15 @@ pub unsafe fn view(d: D, id: u64) -> *mut sys::zend_object {
     if let Cb::Php { closure, .. } = &r.cb {
         obj::set_prop(o, s.closure, zval::copy(&closure.0));
     }
-    match r.kind {
-        Kind::Delay | Kind::Repeat => {
-            obj::set_prop(o, s.interval, zval::double(r.interval));
-            obj::set_prop(o, s.expiration, zval::double(r.expiration));
+    match &r.watch {
+        &Watch::Timer { interval, expiration } => {
+            obj::set_prop(o, s.interval, zval::double(interval));
+            obj::set_prop(o, s.expiration, zval::double(expiration));
             obj::set_prop(o, s.repeat, zval::bool(r.kind == Kind::Repeat));
         }
-        Kind::Readable | Kind::Writable => obj::set_prop(o, s.stream, zval::copy(&r.stream.0)),
-        Kind::Signal => obj::set_prop(o, s.signal, zval::long(r.signal as i64)),
-        Kind::Defer => {}
+        Watch::Stream { stream, .. } => obj::set_prop(o, s.stream, zval::copy(&stream.0)),
+        &Watch::Signal(sig) => obj::set_prop(o, s.signal, zval::long(sig as i64)),
+        Watch::Defer => {}
     }
     r.view = o;
     o
