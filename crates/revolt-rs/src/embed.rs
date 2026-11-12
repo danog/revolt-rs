@@ -243,12 +243,12 @@ unsafe extern "C" fn abi_hold(o: *mut sys::zend_object) {
     if !f.is_null() {
         crate::zend::fiber::inflight::track(f);
     }
-    crate::zend::fiber::inflight::hold(f, vec![zval::obj_ref(o)]);
+    crate::zend::fiber::inflight::hold(f, [zval::obj_ref(o)]);
 }
 
 unsafe extern "C" fn abi_unhold() {
-    for mut z in crate::zend::fiber::inflight::take(crate::zend::active_fiber()) {
-        zval::dtor(&mut z);
+    for z in crate::zend::fiber::inflight::take(crate::zend::active_fiber()).iter_mut() {
+        zval::dtor(z);
     }
 }
 

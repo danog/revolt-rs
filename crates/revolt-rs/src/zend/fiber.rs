@@ -170,13 +170,62 @@ pub unsafe fn suspend(value: &mut zval::Z) -> Zv {
 /// (the embedding API holds values for user fibers too). Key 0 is {main} (never collected).
 pub mod inflight {
     use super::super::{sys, zval};
-    use std::cell::RefCell;
+    use std::cell::UnsafeCell;
     use std::collections::HashMap;
     use std::ffi::c_int;
     use std::ptr::null_mut;
 
+    /// The held values of one fiber: its frames back to back, `marks` the start of each frame.
+    /// Kept (with their capacity) as long as the fiber lives: holds allocate nothing once warm.
+    #[derive(Default)]
+    struct Frames {
+        vals: Vec<zval::Z>,
+        marks: Vec<usize>,
+    }
+
+    /// Fiber object => its frames (boxed: stable while the map grows), and the last one used
+    /// (a fiber holds and takes many times in a row: no lookup then).
+    struct Held {
+        map: HashMap<usize, Box<Frames>, std::hash::BuildHasherDefault<crate::core::IdHasher>>,
+        last_key: usize,
+        last: *mut Frames,
+    }
+
     thread_local! {
-        static HELD: RefCell<HashMap<usize, Vec<Vec<zval::Z>>>> = RefCell::new(HashMap::new());
+        static HELD: UnsafeCell<Held> = UnsafeCell::new(Held { map: HashMap::default(), last_key: usize::MAX, last: null_mut() });
+    }
+
+    /// The thread's table. Never kept across a call into PHP (which may hold, take, or free a
+    /// fiber): every function here takes it anew.
+    #[inline(always)]
+    fn held() -> *mut Held {
+        HELD.with(|h| h.get())
+    }
+
+    /// The frames of `key`, made if needed.
+    #[inline(always)]
+    unsafe fn frames(key: usize) -> *mut Frames {
+        let h = &mut *held();
+        if h.last_key == key {
+            return h.last;
+        }
+        let f: *mut Frames = &mut **h.map.entry(key).or_default();
+        h.last_key = key;
+        h.last = f;
+        f
+    }
+
+    /// The frames of `key` if there are any.
+    #[inline(always)]
+    unsafe fn find(key: usize) -> *mut Frames {
+        let h = &mut *held();
+        if h.last_key == key {
+            return h.last;
+        }
+        match h.map.get_mut(&key) {
+            Some(f) => &mut **f,
+            None => null_mut(),
+        }
     }
 
     static mut HANDLERS: *mut sys::zend_object_handlers = null_mut();
@@ -203,40 +252,90 @@ pub mod inflight {
         }
     }
 
-    /// Holds `values` for the running fiber `f` (owned) until the matching [`take`].
-    pub fn hold(f: *mut sys::zend_object, values: Vec<zval::Z>) {
-        HELD.with(|h| h.borrow_mut().entry(f as usize).or_default().push(values));
+    /// Holds `values` (owned) for the running fiber `f` (null: {main}) until the matching
+    /// [`take`]; returns a pointer to them (the parameters of a call: valid until the next hold
+    /// or take on this thread, so a call must be made right away).
+    #[inline]
+    pub fn hold<I: IntoIterator<Item = zval::Z>>(f: *mut sys::zend_object, values: I) -> (*mut zval::Z, usize) {
+        unsafe {
+            let fr = &mut *frames(f as usize);
+            let start = fr.vals.len();
+            fr.marks.push(start);
+            fr.vals.extend(values);
+            (fr.vals.as_mut_ptr().add(start), fr.vals.len() - start)
+        }
     }
 
-    /// The values of the last [`hold`] for `f` (owned by the caller again).
-    pub fn take(f: *mut sys::zend_object) -> Vec<zval::Z> {
-        HELD.with(|h| {
-            let mut h = h.borrow_mut();
-            let Some(frames) = h.get_mut(&(f as usize)) else { return Vec::new() };
-            let top = frames.pop().unwrap_or_default();
-            if frames.is_empty() {
-                h.remove(&(f as usize));
-            }
-            top
-        })
-    }
-
-    /// A pointer to the values of the last [`hold`] for `f` (stable until its [`take`], nested
-    /// holds included): the parameters of the call.
+    /// The values of the last [`hold`] for `f` (null: {main}), as [`hold`] returned them (they
+    /// may have moved since: holds of nested calls).
+    #[inline]
     pub fn params(f: *mut sys::zend_object) -> (*mut zval::Z, usize) {
-        HELD.with(|h| match h.borrow_mut().get_mut(&(f as usize)).and_then(|frames| frames.last_mut()) {
-            Some(v) => (v.as_mut_ptr(), v.len()),
-            None => (null_mut(), 0),
-        })
+        unsafe {
+            let fr = find(f as usize);
+            if fr.is_null() {
+                return (null_mut(), 0);
+            }
+            let fr = &mut *fr;
+            match fr.marks.last() {
+                Some(&start) => (fr.vals.as_mut_ptr().add(start), fr.vals.len() - start),
+                None => (null_mut(), 0),
+            }
+        }
+    }
+
+    /// The values of the last [`hold`] for `f` (null: {main}), owned by the caller again.
+    #[inline]
+    pub fn take(f: *mut sys::zend_object) -> Taken {
+        let mut out = Taken { len: 0, inline: unsafe { std::mem::zeroed() }, heap: Vec::new() };
+        unsafe {
+            let fr = find(f as usize);
+            if fr.is_null() {
+                return out;
+            }
+            let fr = &mut *fr;
+            let Some(start) = fr.marks.pop() else { return out };
+            let n = fr.vals.len() - start;
+            out.len = n;
+            if n <= INLINE {
+                std::ptr::copy_nonoverlapping(fr.vals.as_ptr().add(start), out.inline.as_mut_ptr(), n);
+                fr.vals.set_len(start);
+            } else {
+                out.heap = fr.vals.split_off(start);
+            }
+            if fr.marks.is_empty() && !f.is_null() && (*f).handlers != HANDLERS as *const _ {
+                // a fiber whose free_obj is not ours: its entry must not outlive it
+                drop(remove(f as usize));
+            }
+        }
+        out
+    }
+
+    const INLINE: usize = 6;
+
+    /// The values of a frame (owned: each is released explicitly, or left UNDEF).
+    pub struct Taken {
+        len: usize,
+        inline: [zval::Z; INLINE],
+        heap: Vec<zval::Z>,
+    }
+
+    impl std::ops::Deref for Taken {
+        type Target = [zval::Z];
+        fn deref(&self) -> &[zval::Z] {
+            if self.len <= INLINE { &self.inline[..self.len] } else { &self.heap }
+        }
+    }
+
+    impl std::ops::DerefMut for Taken {
+        fn deref_mut(&mut self) -> &mut [zval::Z] {
+            if self.len <= INLINE { &mut self.inline[..self.len] } else { &mut self.heap }
+        }
     }
 
     unsafe extern "C" fn get_gc(o: *mut sys::zend_object, table: *mut *mut sys::zval, n: *mut c_int) -> *mut sys::HashTable {
         let ht = ORIG_GC.unwrap()(o, table, n);
-        let ptrs: Vec<*mut sys::zval> = HELD.with(|h| match h.borrow_mut().get_mut(&(o as usize)) {
-            Some(frames) => frames.iter_mut().flatten().map(|z| &mut **z as *mut sys::zval).collect(),
-            None => Vec::new(),
-        });
-        if ptrs.is_empty() {
+        let fr = find(o as usize);
+        if fr.is_null() || (*fr).vals.is_empty() {
             return ht;
         }
         let buf = std::ptr::addr_of_mut!((*super::super::eg()).get_gc_buffer);
@@ -245,7 +344,9 @@ pub mod inflight {
             return ht;
         }
         (*buf).cur = (*buf).start.add(*n as usize);
-        for z in ptrs {
+        // (no PHP code runs here: the frames stay put)
+        for z in (*fr).vals.iter_mut() {
+            let z: *mut sys::zval = &mut **z;
             if zval::is_refcounted(z) {
                 if (*buf).cur == (*buf).end {
                     sys::zend_get_gc_buffer_grow(buf);
@@ -259,19 +360,34 @@ pub mod inflight {
         ht
     }
 
+    /// The frames of `key` leave the table (their values are the caller's).
+    unsafe fn remove(key: usize) -> Option<Box<Frames>> {
+        let h = &mut *held();
+        if h.last_key == key {
+            h.last_key = usize::MAX;
+            h.last = null_mut();
+        }
+        h.map.remove(&key)
+    }
+
     /// RSHUTDOWN: whatever is still held (a frame of a fiber that never resumed) goes.
     pub unsafe fn rshutdown() {
-        let all = HELD.with(|h| std::mem::take(&mut *h.borrow_mut()));
-        for mut z in all.into_values().flatten().flatten() {
-            zval::dtor(&mut z);
+        let keys: Vec<usize> = (*held()).map.keys().copied().collect();
+        for k in keys {
+            if let Some(fr) = remove(k) {
+                for mut z in fr.vals {
+                    zval::dtor(&mut z);
+                }
+            }
         }
     }
 
     unsafe extern "C" fn free_obj(o: *mut sys::zend_object) {
         ORIG_FREE.unwrap()(o);
-        let frames = HELD.with(|h| h.borrow_mut().remove(&(o as usize))).unwrap_or_default();
-        for mut z in frames.into_iter().flatten() {
-            zval::dtor(&mut z);
+        if let Some(fr) = remove(o as usize) {
+            for mut z in fr.vals {
+                zval::dtor(&mut z);
+            }
         }
     }
 }

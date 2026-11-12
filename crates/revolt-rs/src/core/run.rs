@@ -820,13 +820,12 @@ unsafe fn invoke_callback(d: D, id: u64) -> bool {
     let callee = if let Cb::Php { closure, callee } = &r.cb {
         // what the call needs, kept even if the callback is cancelled before it runs; held where
         // the cycle collector sees it (the callback fiber's frames, in Revolt)
-        let mut held = vec![zval::copy(&*closure.0), zval::str_ref(r.id_str)];
-        match kind {
-            Kind::Readable | Kind::Writable => held.push(zval::copy(&*r.stream.0)),
-            Kind::Signal => held.push(zval::long(r.signal as i64)),
-            _ => {}
-        }
-        fiber::inflight::hold(fiber, held);
+        let third = match kind {
+            Kind::Readable | Kind::Writable => Some(zval::copy(&*r.stream.0)),
+            Kind::Signal => Some(zval::long(r.signal as i64)),
+            _ => None,
+        };
+        fiber::inflight::hold(fiber, [zval::copy(&*closure.0), zval::str_ref(r.id_str)].into_iter().chain(third));
         Some(*callee)
     } else {
         None
@@ -844,8 +843,8 @@ unsafe fn invoke_callback(d: D, id: u64) -> bool {
                 let params = std::slice::from_raw_parts_mut(p.add(1), n - 1);
                 let rv = call::call(&callee, params, null_mut());
                 let mut held = fiber::inflight::take(fiber);
-                let closure = Zv(held.remove(0));
-                for z in held.iter_mut() {
+                let closure = Zv(zval::take(&mut held[0]));
+                for z in held[1..].iter_mut() {
                     zval::dtor(z);
                 }
                 let mut rv = rv;
@@ -863,8 +862,8 @@ unsafe fn invoke_callback(d: D, id: u64) -> bool {
                 }
             }
         } else {
-            for mut z in fiber::inflight::take(fiber) {
-                zval::dtor(&mut z);
+            for z in fiber::inflight::take(fiber).iter_mut() {
+                zval::dtor(z);
             }
             return false;
         }
@@ -902,15 +901,8 @@ fn invoke_microtasks(d: D) -> bool {
                     let Some(callee) = call::callee_of(closure.obj()) else { continue };
                     // the closure, the named arguments, then the arguments: held where the
                     // cycle collector sees them while the call runs
-                    let mut held = Vec::with_capacity(args.len() + 2);
                     let (mut closure, mut named) = (closure, named);
-                    held.push(closure.take());
-                    held.push(named.take());
-                    for mut a in args {
-                        held.push(a.take());
-                    }
-                    fiber::inflight::hold(fiber, held);
-                    let (p, n) = fiber::inflight::params(fiber);
+                    let (p, n) = fiber::inflight::hold(fiber, [closure.take(), named.take()].into_iter().chain(args.into_iter().map(|mut a| a.take())));
                     let named_ht = if zval::ty(&*p.add(1)) == zval::ARRAY { (&*p.add(1)).value.arr } else { null_mut() };
                     let params = std::slice::from_raw_parts_mut(p.add(2), n - 2);
                     // the arguments go to the call (Revolt clears $args before the closure runs):
@@ -927,8 +919,8 @@ fn invoke_microtasks(d: D) -> bool {
                     }
                     drop(call::call(&callee, params, named_ht));
                     let mut held = fiber::inflight::take(fiber);
-                    let closure = Zv(held.remove(0));
-                    for (i, z) in held.iter_mut().enumerate() {
+                    let closure = Zv(zval::take(&mut held[0]));
+                    for (i, z) in held[1..].iter_mut().enumerate() {
                         if transfer && i >= 1 {
                             // given to the call, which released them
                             continue;
@@ -945,14 +937,13 @@ fn invoke_microtasks(d: D) -> bool {
                 }
                 Microtask::Resume { fiber: mut f, mut value, throw } => {
                     let fo = f.obj();
-                    fiber::inflight::hold(fiber, vec![f.take(), value.take()]);
+                    let (p, _) = fiber::inflight::hold(fiber, [f.take(), value.take()]);
                     if !fiber::is_terminated(fo) {
-                        let (p, _) = fiber::inflight::params(fiber);
                         let v = &mut *p.add(1);
                         drop(if throw { fiber::throw_into(fo, v) } else { fiber::resume(fo, v) });
                     }
-                    for mut z in fiber::inflight::take(fiber) {
-                        zval::dtor(&mut z);
+                    for z in fiber::inflight::take(fiber).iter_mut() {
+                        zval::dtor(z);
                     }
                     if call::has_exception() {
                         if call::exception_is_unwind() {
@@ -1028,12 +1019,11 @@ unsafe extern "C" fn error_fiber_body(ex: call::Ex, _rv: *mut sys::zval) {
     let Some((mut handler, mut e, _desc)) = d.c().error_stash.take() else { return };
     let Some(callee) = call::callee_of(handler.obj()) else { return };
     let fiber = zend::active_fiber();
-    fiber::inflight::hold(fiber, vec![handler.take(), e.take()]);
-    let (p, _) = fiber::inflight::params(fiber);
+    let (p, _) = fiber::inflight::hold(fiber, [handler.take(), e.take()]);
     drop(call::call(&callee, std::slice::from_raw_parts_mut(p.add(1), 1), null_mut()));
     let mut held = fiber::inflight::take(fiber);
-    let handler = Zv(held.remove(0));
-    for z in held.iter_mut() {
+    let handler = Zv(zval::take(&mut held[0]));
+    for z in held[1..].iter_mut() {
         zval::dtor(z);
     }
     if call::has_exception() {
