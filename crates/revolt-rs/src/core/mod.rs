@@ -208,46 +208,65 @@ impl Drop for Record {
     }
 }
 
-/// The records of a driver: a slab (slots reused, no allocation per callback once warm) and the
-/// id => slot map for the operations by id (PHP passes id strings).
+/// The records of a driver: a slab (slots reused, no allocation per callback once warm; grown
+/// by chunks, so records never move) and the id => slot map for the operations by id (PHP
+/// passes id strings).
 #[derive(Default)]
 pub struct Records {
-    slots: Vec<Option<Record>>,
+    chunks: Vec<Box<[Option<Record>; CHUNK]>>,
+    /// slots never used yet start here
+    fresh: u32,
     free: Vec<u32>,
     map: IdMap<u32>,
 }
 
+const CHUNK: usize = 64;
+
 impl Records {
+    #[inline(always)]
+    fn slot(&mut self, slot: u32) -> &mut Option<Record> {
+        &mut self.chunks[slot as usize / CHUNK][slot as usize % CHUNK]
+    }
+
+    #[inline(always)]
+    fn slot_ref(&self, slot: u32) -> &Option<Record> {
+        &self.chunks[slot as usize / CHUNK][slot as usize % CHUNK]
+    }
+
     /// Stores a record (its `slot` is set); returns it.
+    #[inline]
     pub fn insert(&mut self, mut r: Record) -> &mut Record {
         let slot = match self.free.pop() {
             Some(s) => s,
             None => {
-                self.slots.push(None);
-                (self.slots.len() - 1) as u32
+                if self.fresh as usize == self.chunks.len() * CHUNK {
+                    self.chunks.push(Box::new(std::array::from_fn(|_| None)));
+                }
+                self.fresh += 1;
+                self.fresh - 1
             }
         };
         r.slot = slot;
         self.map.insert(r.id, slot);
-        self.slots[slot as usize].insert(r)
+        self.slot(slot).insert(r)
     }
 
     #[inline]
     pub fn get(&mut self, id: u64) -> Option<&mut Record> {
         let slot = *self.map.get(&id)?;
-        self.slots[slot as usize].as_mut()
+        self.slot(slot).as_mut()
     }
 
     #[inline]
     pub fn get_ref(&self, id: u64) -> Option<&Record> {
         let slot = *self.map.get(&id)?;
-        self.slots[slot as usize].as_ref()
+        self.slot_ref(slot).as_ref()
     }
 
     /// The record of `c` if it still exists (no lookup).
     #[inline(always)]
     pub fn at_id(&mut self, c: Cid) -> Option<&mut Record> {
-        match self.slots.get_mut(c.slot as usize) {
+        match self.chunks.get_mut(c.slot as usize / CHUNK).map(|ch| &mut ch[c.slot as usize % CHUNK]) {
             Some(Some(r)) if r.id == c.id => Some(r),
             _ => None,
         }
@@ -256,15 +275,17 @@ impl Records {
     /// The record in `slot` (which must hold one).
     #[inline(always)]
     pub fn at(&mut self, slot: u32) -> &mut Record {
-        // SAFETY of the unwrap: callers pass slots of live records (the timer heap's)
-        self.slots[slot as usize].as_mut().unwrap()
+        // callers pass slots of live records (the timer heap's)
+        self.slot(slot).as_mut().unwrap()
     }
 
+    /// Takes the record `id` out (one move: its owner drops it outside of the table, since
+    /// dropping it may run PHP code).
+    #[inline]
     pub fn remove(&mut self, id: u64) -> Option<Record> {
         let slot = self.map.remove(&id)?;
-        let r = self.slots[slot as usize].take();
         self.free.push(slot);
-        r
+        self.slot(slot).take()
     }
 
     pub fn len(&self) -> usize {
@@ -272,19 +293,19 @@ impl Records {
     }
 
     pub fn values(&self) -> impl Iterator<Item = &Record> {
-        self.slots.iter().flatten()
+        self.chunks.iter().flat_map(|c| c.iter()).flatten()
     }
 
     pub fn values_mut(&mut self) -> impl Iterator<Item = &mut Record> {
-        self.slots.iter_mut().flatten()
+        self.chunks.iter_mut().flat_map(|c| c.iter_mut()).flatten()
     }
 
     pub fn clear(&mut self) {
         self.map.clear();
         self.free.clear();
+        self.fresh = 0;
         // dropped in slot order (records may run release hooks)
-        let slots = std::mem::take(&mut self.slots);
-        drop(slots);
+        drop(std::mem::take(&mut self.chunks));
     }
 }
 
@@ -666,20 +687,20 @@ impl Core {
     }
 
     /// unset($this->callbacks[$id]) (after disable()).
+    #[inline]
     pub fn remove(&mut self, id: u64) -> Option<Record> {
-        let mut r = self.callbacks.remove(id)?;
-        if r.enabled && r.referenced {
-            self.live -= 1;
-        }
+        let r = self.callbacks.get(id)?;
         if r.enabled {
             self.enabled_n -= 1;
+            if r.referenced {
+                self.live -= 1;
+            }
         }
-        if r.heap_pos != usize::MAX {
-            let pos = r.heap_pos;
-            r.heap_pos = usize::MAX;
+        let pos = std::mem::replace(&mut r.heap_pos, usize::MAX);
+        if pos != usize::MAX {
             self.timers.remove(&mut self.callbacks, pos);
         }
-        Some(r)
+        self.callbacks.remove(id)
     }
 
     /// enqueueCallback()
