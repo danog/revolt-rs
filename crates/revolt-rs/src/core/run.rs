@@ -155,6 +155,13 @@ pub fn disable(d: D, id: u64) -> bool {
 
 /// cancel(): $this->disable() (a userland override is called), then forgotten.
 pub fn cancel(d: D, id: u64) -> bool {
+    let c = d.c();
+    if c.hooks.disable.is_none() && c.hooks.deactivate.is_none() {
+        if let Some(cid) = c.record(id).map(|r| r.cid()) {
+            cancel_at(c, cid);
+        }
+        return true;
+    }
     if !v_disable(d, id) {
         return false;
     }
@@ -171,6 +178,26 @@ pub fn cancel(d: D, id: u64) -> bool {
         }
     }
     true
+}
+
+/// cancel() without PHP hooks (disable() and the removal in one pass): no PHP code runs.
+fn cancel_at(c: &mut Core, cid: Cid) {
+    let Some(r) = c.callbacks.at_id(cid) else { return };
+    if r.enabled {
+        Core::enabled(r, false, &mut c.live, &mut c.enabled_n);
+        r.invokable = false;
+        super::view_set_bool(r.view, super::ViewProp::Invokable, false);
+        Core::unqueue(r, &mut c.enable_queue_len, &mut c.defer_queue_len);
+    }
+    let plan = deactivation(r);
+    if matches!(r.cb, Cb::Native { .. }) && c.in_call == cid.id {
+        // released after its invocation returns
+        c.deferred_release.push(std::mem::replace(&mut r.cb, Cb::Taken));
+    }
+    let r = c.callbacks.remove(cid.id);
+    deactivate_apply(c, plan);
+    // dropped last: releasing its closure may run PHP code
+    drop(r);
 }
 
 pub fn reference(d: D, id: u64) -> bool {
@@ -908,6 +935,10 @@ unsafe fn invoke_callback(d: D, cid: Cid) -> bool {
         None
     };
     let ok = match kind {
+        Kind::Defer | Kind::Delay if native_cancel && d.c().hooks.cancel.is_none() => {
+            cancel_at(d.c(), cid);
+            true
+        }
         Kind::Defer | Kind::Delay => v_cancel(d, id),
         // disable and re-enable, so it does not run again in the same tick (amphp/amp#131)
         Kind::Repeat => v_disable(d, id) && v_enable(d, id),
