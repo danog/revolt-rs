@@ -21,6 +21,9 @@ switch ($argv[1] ?? 'default') {
         revolt_embed_example_delay(10);
         $fiber = new Fiber(static function (): void { revolt_embed_example_sleep(10); });
         $fiber->start();
+        [$a, $b] = stream_socket_pair(DIRECTORY_SEPARATOR === '\\' ? STREAM_PF_INET : STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
+        $fiber2 = new Fiber(static function () use ($a): void { revolt_embed_example_src_wait($a); });
+        $fiber2->start();
         echo json_encode(['pending' => true]), "\n";
         return;
     default:
@@ -65,6 +68,47 @@ if (true) {
     $out['wait_readable'] = revolt_embed_example_wait_readable($a);
     $out['read'] = fread($a, 1);
 }
+
+// sources: sockets waited for edge-triggered, outside the callback records
+$pair = static fn () => stream_socket_pair(DIRECTORY_SEPARATOR === '\\' ? STREAM_PF_INET : STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
+[$a, $b] = $pair();
+EventLoop::delay(0.01, static function () use ($b): void { fwrite($b, 'x'); });
+$out['src_wait'] = revolt_embed_example_src_wait($a);
+$out['src_read'] = fread($a, 1);
+// readiness the loop saw while nobody waited ends the next wait at once
+fwrite($b, 'y');
+EventLoop::delay(0.01, static function (): void {});
+EventLoop::run();
+$out['src_ready'] = revolt_embed_example_src_wait($a);
+$out['src_read_ready'] = fread($a, 1);
+// several fibers resumed by one poll: one flush
+$stats = revolt_embed_example_src_stats();
+$pairs = [$pair(), $pair(), $pair()];
+$results = [];
+foreach ($pairs as $i => [$r]) {
+    (new Fiber(static function () use ($i, $r, &$results): void { $results[$i] = revolt_embed_example_src_wait($r); }))->start();
+}
+EventLoop::delay(0.01, static function () use ($pairs): void {
+    foreach ($pairs as [, $w]) {
+        fwrite($w, 'z');
+    }
+});
+EventLoop::run();
+ksort($results);
+$out['src_fibers'] = $results;
+$after = revolt_embed_example_src_stats();
+$out['src_batch'] = ['takes' => $after['takes'] - $stats['takes'], 'flushes' => $after['flushes'] - $stats['flushes']];
+// writable
+$out['src_writable'] = revolt_embed_example_src_wait($a, true);
+foreach (array_merge([[$a, $b]], $pairs) as [$r]) {
+    revolt_embed_example_src_forget($r);
+}
+// a socket with the number of a forgotten one is registered anew
+fclose($a);
+fclose($b);
+[$a, $b] = $pair();
+EventLoop::delay(0.01, static function () use ($b): void { fwrite($b, 'w'); });
+$out['src_reused'] = revolt_embed_example_src_wait($a);
 
 // the embedder's callback ids are Revolt callbacks of the loop
 $id = revolt_embed_example_delay(10);

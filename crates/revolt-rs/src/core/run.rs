@@ -308,7 +308,24 @@ pub fn deactivate_one(d: D, id: u64) {
 
 /// dispatch() of a native driver called from PHP.
 pub fn dispatch_one(d: D, blocking: bool) {
-    dispatch_native(d.c(), blocking)
+    dispatch_native(d.c(), blocking);
+    flush_sources(d);
+}
+
+/// The source groups the last poll gave events to are flushed (embedding API): each resumes
+/// what its sources' waiters took, outside the callback fiber (it calls no PHP code). An
+/// exception it leaves is handled as a native callback's.
+pub fn flush_sources(d: D) {
+    while let Some((flush, data)) = d.c().reactor.next_flush() {
+        unsafe { flush(data) };
+        if call::has_exception() {
+            if unsafe { call::exception_is_unwind() } {
+                return;
+            }
+            let e = Zv(unsafe { zval::obj_owned(call::take_exception()) });
+            error(d, Desc::Static("native callback"), e);
+        }
+    }
 }
 
 impl ActivateError {
@@ -433,6 +450,7 @@ fn dispatch(d: D, blocking: bool) -> bool {
         }
     }
     dispatch_native(c, blocking);
+    flush_sources(d);
     true
 }
 
@@ -476,6 +494,10 @@ fn dispatch_native(c: &mut Core, mut blocking: bool) {
         }
     }
     c.ready_buf = ready;
+    if c.reactor.flush_pending() {
+        // waiters of sources resume: the next tick polls first, as for ready callbacks
+        c.idle = false;
+    }
     if woke {
         let delivered = c.signals.take_delivered();
         enqueue_signals(c, &delivered);

@@ -17,6 +17,16 @@
 //!   call and has whole milliseconds only.
 //! - Both wait timers stay armed for their deadline across polls: a wait for the same deadline
 //!   (the same next timer) changes nothing, so it costs no kernel timer work.
+//! - Sources (embedding API): raw fds of an embedder registered edge-triggered, outside the
+//!   callback records: registered with the kernel at their first wait, kept until the embedder
+//!   forgets them (before closing them), so a wait makes no control call. An event is offered to
+//!   the source's armed waiter (its group's `take`, called during the poll), else kept as ready
+//!   bits that the next wait of the source consumes (it then returns at once). After the poll,
+//!   each group whose `take` accepted something is flushed once (one call per poll, not one per
+//!   source). Linux: EPOLLET with EPOLLIN|EPOLLOUT|EPOLLRDHUP (bit 63 of the event data marks a
+//!   source); kqueue: EVFILT_READ with EV_CLEAR once, EVFILT_WRITE one-shot per wait (macOS
+//!   reports an edge-triggered write filter at every ACK that frees send-buffer space);
+//!   Windows: an armed source is polled level-triggered with the other sockets.
 
 use std::collections::HashMap;
 use std::hash::BuildHasherDefault;
@@ -26,6 +36,52 @@ use std::sync::atomic::Ordering;
 
 pub const READ: u8 = 1;
 pub const WRITE: u8 = 2;
+/// a source's error or hang-up (reported with READ)
+pub const ERR: u8 = 4;
+
+/// Marks a source in the data of its epoll event.
+#[cfg(target_os = "linux")]
+const SRC_TAG: u64 = 1 << 63;
+
+/// A source group's functions (see `Group`).
+pub type SrcTakeFn = unsafe extern "C" fn(data: *mut std::ffi::c_void, token: u64) -> bool;
+pub type SrcFlushFn = unsafe extern "C" fn(data: *mut std::ffi::c_void);
+
+/// An embedder's sources: `take(data, token)` is called during the poll for each event of a
+/// source armed with `token` (true: the waiter took it; false: it no longer waits, the readiness
+/// is kept for the next wait); `flush(data)` once after the poll when some `take` returned true.
+/// Neither may call into the loop or PHP from `take`.
+#[derive(Clone, Copy)]
+pub struct Group {
+    pub take: SrcTakeFn,
+    pub flush: SrcFlushFn,
+    pub data: *mut std::ffi::c_void,
+    /// counted in the driver's live callbacks (the loop runs while it is)
+    pub referenced: bool,
+    /// a `take` returned true since the last flush
+    pending: bool,
+}
+
+/// A source to arm or disarm: an fd (a SOCKET on Windows) and what the wait is for (READ, WRITE).
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct SrcFd {
+    pub fd: i64,
+    pub events: u32,
+}
+
+#[derive(Clone, Copy, Default)]
+struct SrcEntry {
+    /// the group (1-based) of the waiter / of the last arm
+    group: u32,
+    /// registered with the poller (Unix)
+    registered: bool,
+    /// readiness seen while nobody waited for it (READ, WRITE, ERR)
+    ready: u8,
+    /// what the armed waiter waits for (0: not armed)
+    want: u8,
+    token: u64,
+}
 
 /// Bumped in fork() children (pthread_atfork).
 pub static FORK_GEN: AtomicU64 = AtomicU64::new(0);
@@ -92,6 +148,12 @@ pub struct Reactor {
     /// Linux: the wait timer's timerfd, in the poller (-1: not made yet; -2: unavailable)
     #[cfg(target_os = "linux")]
     timer_fd: i32,
+    /// the sources, by fd
+    src: HashMap<i64, SrcEntry, BuildHasherDefault<super::IdHasher>>,
+    /// the source groups (id = index + 1; None: closed)
+    groups: Vec<Option<Group>>,
+    /// a group is waiting for its flush
+    flush_pending: bool,
 }
 
 /// macOS: the ident of the wait timer (EVFILT_TIMER idents are not fds)
@@ -119,6 +181,9 @@ impl Reactor {
             timer_armed: None,
             #[cfg(target_os = "linux")]
             timer_fd: -1,
+            src: HashMap::default(),
+            groups: Vec::new(),
+            flush_pending: false,
         }
     }
 
@@ -177,6 +242,197 @@ impl Reactor {
             }
         }
         self.wake = fd;
+    }
+
+    /// A new source group; its id (never 0).
+    pub fn src_group(&mut self, take: SrcTakeFn, flush: SrcFlushFn, data: *mut std::ffi::c_void) -> u32 {
+        let g = Group { take, flush, data, referenced: false, pending: false };
+        match self.groups.iter().position(Option::is_none) {
+            Some(i) => {
+                self.groups[i] = Some(g);
+                i as u32 + 1
+            }
+            None => {
+                self.groups.push(Some(g));
+                self.groups.len() as u32
+            }
+        }
+    }
+
+    fn group_mut(&mut self, g: u32) -> Option<&mut Group> {
+        self.groups.get_mut((g as usize).wrapping_sub(1)).and_then(Option::as_mut)
+    }
+
+    /// Closes a group: its sources are forgotten (their kernel registrations stay until the fds
+    /// close: events for unknown sources are ignored, and a later arm registers anew). Returns
+    /// whether it was referenced.
+    pub fn src_close(&mut self, g: u32) -> bool {
+        let Some(slot) = self.groups.get_mut((g as usize).wrapping_sub(1)) else { return false };
+        let Some(old) = slot.take() else { return false };
+        self.src.retain(|_, e| e.group != g);
+        old.referenced
+    }
+
+    /// Sets whether a group is referenced; Some(true) when that changed it.
+    pub fn src_set_referenced(&mut self, g: u32, on: bool) -> Option<bool> {
+        let gr = self.group_mut(g)?;
+        let changed = gr.referenced != on;
+        gr.referenced = on;
+        Some(changed)
+    }
+
+    /// Arms the sources `fds` of group `g` for the wait `token`. Ok(true): one of them already
+    /// had readiness for what it waits for (consumed; nothing is armed): the waiter retries its
+    /// I/O instead of waiting. Err: the poller refused a source (errno).
+    pub fn src_arm(&mut self, g: u32, fds: &[SrcFd], token: u64) -> Result<bool, i32> {
+        if self.group_mut(g).is_none() {
+            return Err(libc::EBADF);
+        }
+        #[cfg(unix)]
+        self.check_fork();
+        let mut hit = false;
+        for p in fds.iter().filter(|p| p.fd >= 0) {
+            if let Some(e) = self.src.get_mut(&p.fd) {
+                let bits = e.ready & (p.events as u8 | ERR);
+                e.ready &= !bits;
+                hit |= bits != 0;
+            }
+        }
+        if hit {
+            return Ok(true);
+        }
+        for (k, p) in fds.iter().enumerate().filter(|(_, p)| p.fd >= 0) {
+            if let Err(err) = self.src_watch(g, p, token) {
+                for q in fds[..k].iter().filter(|q| q.fd >= 0) {
+                    if let Some(e) = self.src.get_mut(&q.fd).filter(|e| e.token == token) {
+                        e.want = 0;
+                    }
+                }
+                return Err(err);
+            }
+        }
+        Ok(false)
+    }
+
+    /// The wait `token` over `fds` ended: its sources are no longer armed for it.
+    pub fn src_disarm(&mut self, fds: &[SrcFd], token: u64) {
+        for p in fds {
+            if let Some(e) = self.src.get_mut(&p.fd).filter(|e| e.token == token) {
+                e.want = 0;
+            }
+        }
+    }
+
+    /// The source `fd` is about to be closed: its state goes (a later fd with its number is
+    /// registered anew).
+    pub fn src_forget(&mut self, fd: i64) {
+        self.src.remove(&fd);
+    }
+
+    /// Whether a poll left a group to flush.
+    #[inline]
+    pub fn flush_pending(&self) -> bool {
+        self.flush_pending
+    }
+
+    /// The next group a poll left to flush (its flag cleared): (flush, data).
+    pub fn next_flush(&mut self) -> Option<(SrcFlushFn, *mut std::ffi::c_void)> {
+        if !self.flush_pending {
+            return None;
+        }
+        for g in self.groups.iter_mut().flatten() {
+            if g.pending {
+                g.pending = false;
+                return Some((g.flush, g.data));
+            }
+        }
+        self.flush_pending = false;
+        None
+    }
+
+    /// An event `bits` of the source `fd`: offered to its armed waiter, else kept as ready bits.
+    fn src_event(&mut self, fd: i64, bits: u8) {
+        let Some(e) = self.src.get_mut(&fd) else { return };
+        if e.want != 0 && bits & (e.want | ERR) != 0 {
+            if let Some(g) = self.groups.get_mut((e.group as usize).wrapping_sub(1)).and_then(Option::as_mut) {
+                // SAFETY: the group's function, which must not call into the loop
+                if unsafe { (g.take)(g.data, e.token) } {
+                    g.pending = true;
+                    self.flush_pending = true;
+                    e.ready |= bits & !(e.want | ERR);
+                    e.want = 0;
+                    return;
+                }
+            }
+        }
+        e.ready |= bits;
+        #[cfg(windows)]
+        {
+            // level-triggered: an armed source nobody takes would be reported at every poll
+            e.want = 0;
+        }
+    }
+
+    /// Registers the source `p` with the poller if needed and arms it.
+    #[cfg(target_os = "linux")]
+    fn src_watch(&mut self, g: u32, p: &SrcFd, token: u64) -> Result<(), i32> {
+        let registered = self.src.get(&p.fd).is_some_and(|e| e.registered);
+        if !registered {
+            if !self.ensure_poller() {
+                return Err(errno());
+            }
+            let mut ev = libc::epoll_event { events: (libc::EPOLLIN | libc::EPOLLOUT | libc::EPOLLRDHUP | libc::EPOLLET) as u32, u64: p.fd as u64 | SRC_TAG };
+            // SAFETY: a valid event for the fd
+            if unsafe { libc::epoll_ctl(self.poller, libc::EPOLL_CTL_ADD, p.fd as i32, &mut ev) } != 0 {
+                let err = errno();
+                // registered by a closed group of this poller: still the same registration
+                if err != libc::EEXIST {
+                    return Err(err);
+                }
+            }
+        }
+        let e = self.src.entry(p.fd).or_default();
+        *e = SrcEntry { group: g, registered: true, want: p.events as u8 & (READ | WRITE), token, ..*e };
+        Ok(())
+    }
+
+    #[cfg(all(unix, not(target_os = "linux")))]
+    fn src_watch(&mut self, g: u32, p: &SrcFd, token: u64) -> Result<(), i32> {
+        let registered = self.src.get(&p.fd).is_some_and(|e| e.registered);
+        let write = p.events as u8 & WRITE != 0;
+        if !registered || write {
+            if !self.ensure_poller() {
+                return Err(errno());
+            }
+            let kev = |filter, flags| {
+                // SAFETY: kevent is plain data
+                let mut k: libc::kevent = unsafe { std::mem::zeroed() };
+                k.ident = p.fd as usize;
+                k.filter = filter;
+                k.flags = flags;
+                k
+            };
+            let ch = [kev(libc::EVFILT_READ, libc::EV_ADD | libc::EV_CLEAR), kev(libc::EVFILT_WRITE, libc::EV_ADD | libc::EV_ONESHOT)];
+            let changes: &[libc::kevent] = match (registered, write) {
+                (false, true) => &ch,
+                (false, false) => &ch[..1],
+                (true, _) => &ch[1..],
+            };
+            // SAFETY: a valid changelist, no event list
+            if unsafe { libc::kevent(self.poller, changes.as_ptr(), changes.len() as libc::c_int, std::ptr::null_mut(), 0, std::ptr::null()) } < 0 {
+                return Err(errno());
+            }
+        }
+        let e = self.src.entry(p.fd).or_default();
+        *e = SrcEntry { group: g, registered: true, want: p.events as u8 & (READ | WRITE), token, ..*e };
+        Ok(())
+    }
+
+    #[cfg(windows)]
+    fn src_watch(&mut self, g: u32, p: &SrcFd, token: u64) -> Result<(), i32> {
+        let e = self.src.entry(p.fd).or_default();
+        *e = SrcEntry { group: g, registered: true, want: p.events as u8 & (READ | WRITE), token, ..*e };
+        Ok(())
     }
 
     /// Whether some watched fd is always ready (the poll must not block).
@@ -258,6 +514,18 @@ impl Reactor {
             }
         }
         self.n_always = 0;
+        // the sources are registered anew at their next wait (an armed one now: at once)
+        let armed: Vec<SrcFd> = self.src.iter().filter(|(_, e)| e.want != 0).map(|(&fd, e)| SrcFd { fd, events: e.want as u32 }).collect();
+        for e in self.src.values_mut() {
+            e.registered = false;
+        }
+        for p in armed {
+            let (g, token) = self.src.get(&p.fd).map(|e| (e.group, e.token)).unwrap_or_default();
+            if self.src_watch(g, &p, token).is_err() {
+                // report it to its waiter, which finds out what is wrong when it retries
+                self.src_event(p.fd, READ | WRITE | ERR);
+            }
+        }
     }
 
     #[cfg(windows)]
@@ -447,7 +715,7 @@ impl Reactor {
 
     #[cfg(target_os = "linux")]
     fn poll_os(&mut self, timeout: Option<f64>, deadline: Option<f64>, out: &mut Vec<Ready>, woke: &mut bool) {
-        let n = self.fds.len() + 2;
+        let n = self.fds.len() + self.src.len() + 2;
         if self.events.len() < n.min(1024) {
             self.events.resize(n.min(1024), libc::epoll_event { events: 0, u64: 0 });
         }
@@ -470,7 +738,22 @@ impl Reactor {
         if r <= 0 {
             return;
         }
-        for ev in &self.events[..r as usize] {
+        for i in 0..r as usize {
+            let ev = self.events[i];
+            if ev.u64 & SRC_TAG != 0 {
+                let mut bits = 0;
+                if ev.events & libc::EPOLLIN as u32 != 0 {
+                    bits |= READ;
+                }
+                if ev.events & libc::EPOLLOUT as u32 != 0 {
+                    bits |= WRITE;
+                }
+                if ev.events & (libc::EPOLLERR | libc::EPOLLHUP | libc::EPOLLRDHUP) as u32 != 0 {
+                    bits |= ERR | READ;
+                }
+                self.src_event((ev.u64 & !SRC_TAG) as i64, bits);
+                continue;
+            }
             let fd = ev.u64 as i64;
             if fd == self.wake {
                 *woke = true;
@@ -493,7 +776,7 @@ impl Reactor {
     #[cfg(all(unix, not(target_os = "linux")))]
     #[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
     fn poll_os(&mut self, timeout: Option<f64>, deadline: Option<f64>, out: &mut Vec<Ready>, woke: &mut bool) {
-        let n = (2 * self.fds.len() + 2).min(1024);
+        let n = (2 * (self.fds.len() + self.src.len()) + 2).min(1024);
         if self.events.len() < n {
             self.events.resize(n, unsafe { std::mem::zeroed() });
         }
@@ -544,18 +827,27 @@ impl Reactor {
             return;
         }
         let start = out.len();
-        for ev in &self.events[..r as usize] {
+        for i in 0..r as usize {
+            let ev = self.events[i];
             let fd = ev.ident as i64;
+            #[cfg(target_os = "macos")]
+            if ev.filter == libc::EVFILT_TIMER {
+                self.timer_armed = None;
+                continue;
+            }
             if fd == self.wake {
                 *woke = true;
                 continue;
             }
-            if ev.flags & libc::EV_ERROR != 0 {
+            if self.src.contains_key(&fd) && (ev.filter == libc::EVFILT_READ || ev.filter == libc::EVFILT_WRITE) {
+                let mut bits = if ev.filter == libc::EVFILT_READ { READ } else { WRITE };
+                if ev.flags & (libc::EV_EOF | libc::EV_ERROR) != 0 {
+                    bits |= ERR;
+                }
+                self.src_event(fd, bits);
                 continue;
             }
-            #[cfg(target_os = "macos")]
-            if ev.filter == libc::EVFILT_TIMER {
-                self.timer_armed = None;
+            if ev.flags & libc::EV_ERROR != 0 {
                 continue;
             }
             let rd = ev.filter == libc::EVFILT_READ;
@@ -597,6 +889,21 @@ impl Reactor {
             }
             pfds.push(WSAPOLLFD { fd: fd as usize, events: ev, revents: 0 });
         }
+        // the armed sources (sockets), after the watchers' fds
+        let n_fds = pfds.len();
+        for (&fd, e) in self.src.iter() {
+            if e.want == 0 {
+                continue;
+            }
+            let mut ev = 0i16;
+            if e.want & READ != 0 {
+                ev |= POLLRDNORM as i16;
+            }
+            if e.want & WRITE != 0 {
+                ev |= POLLWRNORM as i16;
+            }
+            pfds.push(WSAPOLLFD { fd: fd as usize, events: ev, revents: 0 });
+        }
         let mut timeout = timeout;
         if !out.is_empty() {
             timeout = Some(0.0);
@@ -619,12 +926,18 @@ impl Reactor {
         if r <= 0 {
             return false;
         }
-        for p in &pfds {
+        for (i, p) in pfds.iter().enumerate() {
             if p.revents == 0 {
                 continue;
             }
             let err = p.revents & (POLLERR | POLLHUP) as i16 != 0;
-            out.push((p.fd as i64, err || p.revents & POLLRDNORM as i16 != 0, err || p.revents & POLLWRNORM as i16 != 0));
+            let (rd, wr) = (err || p.revents & POLLRDNORM as i16 != 0, err || p.revents & POLLWRNORM as i16 != 0);
+            if i >= n_fds {
+                let bits = (if rd { READ } else { 0 }) | (if wr { WRITE } else { 0 }) | (if err { ERR } else { 0 });
+                self.src_event(p.fd as i64, bits);
+                continue;
+            }
+            out.push((p.fd as i64, rd, wr));
         }
         false
     }
@@ -641,6 +954,12 @@ impl Drop for Reactor {
             unsafe { libc::close(self.timer_fd) };
         }
     }
+}
+
+/// The last OS error number.
+#[cfg(unix)]
+fn errno() -> i32 {
+    std::io::Error::last_os_error().raw_os_error().unwrap_or(libc::EIO)
 }
 
 /// Sleeps (no fd to wait for): usleep() as Revolt's stream_select driver does; returns early on

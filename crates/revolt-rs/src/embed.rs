@@ -9,6 +9,8 @@
 //!   refused) through the owner's table when that is compatible. Otherwise (an incompatible
 //!   owner, or classes that are not revolt-rs's) the embedder may call `Revolt\EventLoop` through
 //!   PHP ([`php`]).
+//! - Sources: raw sockets registered edge-triggered in the driver's poller, delivered to the
+//!   embedder in batches (`src_*`).
 //! - Callbacks are Rust functions `cb(data, id)`; `release(data)` (optional) runs exactly once,
 //!   when the callback is gone (fired once, cancelled, or its driver destroyed). Neither may
 //!   call back into the loop for the same callback from `release`.
@@ -17,6 +19,7 @@
 
 use crate::classes::{self, suspension};
 use crate::core::run::{self, D};
+pub use crate::core::backend::{SrcFd, SrcFlushFn, SrcTakeFn, READ as SRC_READ, WRITE as SRC_WRITE};
 use crate::core::{Cb, Microtask, NativeFn, ReleaseFn};
 use crate::zend::{call, stream::Handle, sys, zval, zval::Zv};
 use std::ffi::{c_char, c_void};
@@ -25,7 +28,8 @@ use std::sync::OnceLock;
 /// The ABI major version: a copy uses another copy's table only with the same major and a size
 /// at least as large as its own.
 pub const ABI_MAJOR: u32 = 1;
-pub const ABI_MINOR: u32 = 0;
+/// 1: the sources (`src_*`)
+pub const ABI_MINOR: u32 = 1;
 
 /// The C-ABI function table of a revolt-rs copy. Drivers and suspensions are `zend_object`s;
 /// functions returning bool return false with a PHP exception pending (or for an invalid id).
@@ -68,6 +72,21 @@ pub struct Abi {
     pub hold: unsafe extern "C" fn(*mut sys::zend_object),
     /// Releases the last `hold` of the running fiber or {main}.
     pub unhold: unsafe extern "C" fn(),
+    // ---- minor 1: sources (see EMBEDDING.md, "Sources")
+    /// A new source group on the driver: its id (0: none, with an exception pending).
+    pub src_group: unsafe extern "C" fn(*mut sys::zend_object, SrcTakeFn, SrcFlushFn, *mut c_void) -> u32,
+    /// Closes a group (its sources are forgotten; unreferenced).
+    pub src_close: unsafe extern "C" fn(*mut sys::zend_object, u32),
+    /// References / unreferences a group: while referenced, the loop runs (as for a referenced
+    /// callback).
+    pub src_reference: unsafe extern "C" fn(*mut sys::zend_object, u32, bool),
+    /// Arms `n` sources of a group for the wait `token`: 1 when one was already ready (consumed,
+    /// nothing armed), 0 when armed, -errno when the poller refused one.
+    pub src_arm: unsafe extern "C" fn(*mut sys::zend_object, u32, *const SrcFd, usize, u64) -> i32,
+    /// The wait `token` over `n` sources ended.
+    pub src_disarm: unsafe extern "C" fn(*mut sys::zend_object, *const SrcFd, usize, u64),
+    /// A source is about to be closed.
+    pub src_forget: unsafe extern "C" fn(*mut sys::zend_object, i64),
 }
 
 unsafe impl Sync for Abi {}
@@ -147,6 +166,45 @@ unsafe extern "C" fn abi_throw(s: *mut sys::zend_object, e: *mut sys::zend_objec
     !call::has_exception()
 }
 
+unsafe extern "C" fn abi_src_group(d: *mut sys::zend_object, take: SrcTakeFn, flush: SrcFlushFn, data: *mut c_void) -> u32 {
+    D(d).c().reactor.src_group(take, flush, data)
+}
+
+unsafe extern "C" fn abi_src_close(d: *mut sys::zend_object, g: u32) {
+    let c = D(d).c();
+    if c.reactor.src_close(g) {
+        c.live -= 1;
+    }
+}
+
+unsafe extern "C" fn abi_src_reference(d: *mut sys::zend_object, g: u32, on: bool) {
+    let c = D(d).c();
+    if c.reactor.src_set_referenced(g, on) == Some(true) {
+        if on {
+            c.live += 1;
+        } else {
+            c.live -= 1;
+        }
+    }
+}
+
+unsafe extern "C" fn abi_src_arm(d: *mut sys::zend_object, g: u32, fds: *const SrcFd, n: usize, token: u64) -> i32 {
+    let fds = if n == 0 { &[][..] } else { std::slice::from_raw_parts(fds, n) };
+    match D(d).c().reactor.src_arm(g, fds, token) {
+        Ok(hit) => hit as i32,
+        Err(e) => -e.max(1),
+    }
+}
+
+unsafe extern "C" fn abi_src_disarm(d: *mut sys::zend_object, fds: *const SrcFd, n: usize, token: u64) {
+    let fds = if n == 0 { &[][..] } else { std::slice::from_raw_parts(fds, n) };
+    D(d).c().reactor.src_disarm(fds, token)
+}
+
+unsafe extern "C" fn abi_src_forget(d: *mut sys::zend_object, fd: i64) {
+    D(d).c().reactor.src_forget(fd)
+}
+
 // test builds only (tools/embed-test.sh): an owner whose table another copy must refuse
 #[cfg(feature = "test-abi-major-mismatch")]
 const EXPORTED_MAJOR: u32 = ABI_MAJOR + 1;
@@ -196,6 +254,12 @@ pub static revolt_rs_abi_v1: Abi = Abi {
     throw: abi_throw,
     hold: abi_hold,
     unhold: abi_unhold,
+    src_group: abi_src_group,
+    src_close: abi_src_close,
+    src_reference: abi_src_reference,
+    src_arm: abi_src_arm,
+    src_disarm: abi_src_disarm,
+    src_forget: abi_src_forget,
 };
 
 struct AbiRef(Option<&'static Abi>);
@@ -386,7 +450,43 @@ impl NativeLoop {
     pub unsafe fn unhold(&self) {
         (self.abi.unhold)()
     }
+
+    /// A new source group on this driver (see EMBEDDING.md, "Sources"): `take(data, token)`
+    /// is called during the loop's poll for each event of an armed source, `flush(data)` once
+    /// after that poll when some `take` returned true. Its id; 0 with an exception pending.
+    /// The group lives as long as the driver, or until [`NativeLoop::src_close`].
+    pub unsafe fn src_group(&self, take: SrcTakeFn, flush: SrcFlushFn, data: *mut c_void) -> u32 {
+        (self.abi.src_group)(self.driver, take, flush, data)
+    }
+
+    pub unsafe fn src_close(&self, g: u32) {
+        (self.abi.src_close)(self.driver, g)
+    }
+
+    /// While a group is referenced the loop runs (as while a referenced callback is enabled).
+    pub unsafe fn src_reference(&self, g: u32, on: bool) {
+        (self.abi.src_reference)(self.driver, g, on)
+    }
+
+    /// Arms `fds` for the wait `token`: Ok(true) when one of them was already ready (nothing is
+    /// armed: retry the I/O), Ok(false) when armed.
+    pub unsafe fn src_arm(&self, g: u32, fds: &[SrcFd], token: u64) -> std::io::Result<bool> {
+        match (self.abi.src_arm)(self.driver, g, fds.as_ptr(), fds.len(), token) {
+            r if r < 0 => Err(std::io::Error::from_raw_os_error(-r)),
+            r => Ok(r > 0),
+        }
+    }
+
+    pub unsafe fn src_disarm(&self, fds: &[SrcFd], token: u64) {
+        (self.abi.src_disarm)(self.driver, fds.as_ptr(), fds.len(), token)
+    }
+
+    /// The source `fd` is about to be closed (a later fd with its number is registered anew).
+    pub unsafe fn src_forget(&self, fd: i64) {
+        (self.abi.src_forget)(self.driver, fd)
+    }
 }
+
 
 /// The fallback: `Revolt\EventLoop`'s static methods through PHP (autoloaded if needed, so it
 /// works with the PHP library too).

@@ -65,6 +65,14 @@ final class EmbedderTest extends TestCase
             self::assertSame($path, $r['wait_readable']);
             self::assertSame('x', $r['read']);
         }
+        self::assertSame($path, $r['src_wait']);
+        self::assertSame('x', $r['src_read']);
+        self::assertSame($path === 'native' ? 'ready' : $path, $r['src_ready']);
+        self::assertSame('y', $r['src_read_ready']);
+        self::assertSame([$path, $path, $path], $r['src_fibers']);
+        self::assertSame($path === 'native' ? ['takes' => 3, 'flushes' => 1] : ['takes' => 0, 'flushes' => 0], $r['src_batch']);
+        self::assertContains($r['src_writable'], $path === 'native' ? ['native', 'ready'] : ['php']);
+        self::assertSame($path, $r['src_reused']);
         self::assertSame('from a callback', $r['uncaught']);
         self::assertSame([], $r['identifiers_after_uncaught']);
         if ($path === 'native') {
