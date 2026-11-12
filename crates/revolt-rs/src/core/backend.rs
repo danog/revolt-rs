@@ -12,6 +12,11 @@
 //! - macOS: timed waits go through a one-shot EVFILT_TIMER with NOTE_CRITICAL (kqueue even when
 //!   no fd is watched): the system's timer coalescing otherwise delays nanosleep()/kevent()
 //!   wake-ups by up to 10% of the timeout (more for background processes).
+//! - Linux: timed waits go through a timerfd armed for the deadline (absolute, CLOCK_MONOTONIC:
+//!   the loop clock), polled with the fds: epoll_wait()'s own timeout costs a kernel timer per
+//!   call and has whole milliseconds only.
+//! - Both wait timers stay armed for their deadline across polls: a wait for the same deadline
+//!   (the same next timer) changes nothing, so it costs no kernel timer work.
 
 use std::collections::HashMap;
 use std::sync::atomic::AtomicU64;
@@ -75,9 +80,13 @@ pub struct Reactor {
     events: Vec<libc::epoll_event>,
     #[cfg(all(unix, not(target_os = "linux")))]
     events: Vec<libc::kevent>,
-    /// macOS: the one-shot wait timer may still be armed (an fd woke the last wait first)
-    #[cfg(target_os = "macos")]
-    timer_armed: bool,
+    /// the deadline (loop clock) the wait timer is armed for, while it may be (it has not been
+    /// seen firing); NaN: armed for a wait without a known deadline (macOS)
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    timer_armed: Option<f64>,
+    /// Linux: the wait timer's timerfd, in the poller (-1: not made yet; -2: unavailable)
+    #[cfg(target_os = "linux")]
+    timer_fd: i32,
 }
 
 /// macOS: the ident of the wait timer (EVFILT_TIMER idents are not fds)
@@ -99,8 +108,10 @@ impl Reactor {
             wake: -1,
             #[cfg(unix)]
             events: Vec::new(),
-            #[cfg(target_os = "macos")]
-            timer_armed: false,
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
+            timer_armed: None,
+            #[cfg(target_os = "linux")]
+            timer_fd: -1,
         }
     }
 
@@ -163,9 +174,10 @@ impl Reactor {
         self.fds.values().any(|e| e.always && e.want() != 0)
     }
 
-    /// Polls for readiness for at most `timeout` seconds (None: no limit); appends the ready fds
-    /// to `out`; returns whether the wake pipe was signalled. EINTR returns at once, empty.
-    pub fn poll(&mut self, timeout: Option<f64>, out: &mut Vec<Ready>) -> bool {
+    /// Polls for readiness for at most `timeout` seconds (None: no limit), which end at
+    /// `deadline` on the loop clock when it is known; appends the ready fds to `out`; returns
+    /// whether the wake pipe was signalled. EINTR returns at once, empty.
+    pub fn poll(&mut self, timeout: Option<f64>, deadline: Option<f64>, out: &mut Vec<Ready>) -> bool {
         self.check_fork();
         self.apply();
         let mut timeout = timeout;
@@ -194,7 +206,7 @@ impl Reactor {
                 sleep(timeout);
                 return false;
             }
-            self.poll_os(timeout, out, &mut woke);
+            self.poll_os(timeout, deadline, out, &mut woke);
             woke
         }
     }
@@ -214,10 +226,16 @@ impl Reactor {
                 libc::close(self.poller)
             };
             self.poller = -1;
-            #[cfg(target_os = "macos")]
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
             {
-                self.timer_armed = false;
+                self.timer_armed = None;
             }
+        }
+        // the timerfd is shared with the parent too: arming it would move the parent's timer
+        #[cfg(target_os = "linux")]
+        if self.timer_fd >= 0 {
+            unsafe { libc::close(self.timer_fd) };
+            self.timer_fd = -1;
         }
         for (&fd, e) in self.fds.iter_mut() {
             e.registered = 0;
@@ -373,16 +391,62 @@ impl Reactor {
         true
     }
 
+    /// Linux: arms the wait timer for `at` (loop clock) unless it is armed for it already; false
+    /// when there is no timerfd.
     #[cfg(target_os = "linux")]
-    fn poll_os(&mut self, timeout: Option<f64>, out: &mut Vec<Ready>, woke: &mut bool) {
-        let n = self.fds.len() + 1;
+    fn arm_timer(&mut self, at: f64) -> bool {
+        if self.timer_fd == -1 {
+            let fd = unsafe { libc::timerfd_create(libc::CLOCK_MONOTONIC, libc::TFD_CLOEXEC | libc::TFD_NONBLOCK) };
+            let mut ev = libc::epoll_event { events: libc::EPOLLIN as u32, u64: fd as u64 };
+            if fd >= 0 && unsafe { libc::epoll_ctl(self.poller, libc::EPOLL_CTL_ADD, fd, &mut ev) } == 0 {
+                self.timer_fd = fd;
+            } else {
+                if fd >= 0 {
+                    unsafe { libc::close(fd) };
+                }
+                self.timer_fd = -2;
+            }
+        }
+        if self.timer_fd < 0 {
+            return false;
+        }
+        if self.timer_armed == Some(at) {
+            return true;
+        }
+        // rounded up: an early wake-up would spin until the timer is due
+        let ns = (at.fract() * 1e9).ceil();
+        let (sec, ns) = if ns >= 1e9 { (at.trunc() + 1.0, 0.0) } else { (at.trunc(), ns) };
+        let spec = libc::itimerspec {
+            it_interval: libc::timespec { tv_sec: 0, tv_nsec: 0 },
+            // at least 1 ns: zero disarms
+            it_value: libc::timespec { tv_sec: sec.min(i64::MAX as f64) as libc::time_t, tv_nsec: if sec <= 0.0 { ns.max(1.0) } else { ns } as libc::c_long },
+        };
+        if unsafe { libc::timerfd_settime(self.timer_fd, libc::TFD_TIMER_ABSTIME, &spec, std::ptr::null_mut()) } != 0 {
+            return false;
+        }
+        self.timer_armed = Some(at);
+        true
+    }
+
+    #[cfg(target_os = "linux")]
+    fn poll_os(&mut self, timeout: Option<f64>, deadline: Option<f64>, out: &mut Vec<Ready>, woke: &mut bool) {
+        let n = self.fds.len() + 2;
         if self.events.len() < n.min(1024) {
             self.events.resize(n.min(1024), libc::epoll_event { events: 0, u64: 0 });
         }
-        // whole milliseconds, rounded up (an early wake-up would spin until the timer is due)
         let ms = match timeout {
-            None => -1,
+            None => {
+                if self.timer_armed.take().is_some() {
+                    // a stale timer would end a wait without timeout early
+                    let off: libc::itimerspec = unsafe { std::mem::zeroed() };
+                    unsafe { libc::timerfd_settime(self.timer_fd, 0, &off, std::ptr::null_mut()) };
+                }
+                -1
+            }
+            // a non-blocking poll leaves the timer armed (it ends no wait)
             Some(t) if t <= 0.0 => 0,
+            Some(_) if deadline.is_some_and(|at| self.arm_timer(at)) => -1,
+            // whole milliseconds, rounded up (an early wake-up would spin until the timer is due)
             Some(t) => (t * 1000.0).ceil().min(i32::MAX as f64) as i32,
         };
         let r = unsafe { libc::epoll_wait(self.poller, self.events.as_mut_ptr(), self.events.len() as i32, ms) };
@@ -395,6 +459,13 @@ impl Reactor {
                 *woke = true;
                 continue;
             }
+            if fd == self.timer_fd as i64 {
+                // expired: its count is read (else it stays readable)
+                let mut n = 0u64;
+                unsafe { libc::read(self.timer_fd, &mut n as *mut u64 as *mut _, 8) };
+                self.timer_armed = None;
+                continue;
+            }
             let err = ev.events & (libc::EPOLLERR | libc::EPOLLHUP) as u32 != 0;
             let rd = err || ev.events & libc::EPOLLIN as u32 != 0;
             let wr = err || ev.events & libc::EPOLLOUT as u32 != 0;
@@ -403,7 +474,8 @@ impl Reactor {
     }
 
     #[cfg(all(unix, not(target_os = "linux")))]
-    fn poll_os(&mut self, timeout: Option<f64>, out: &mut Vec<Ready>, woke: &mut bool) {
+    #[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
+    fn poll_os(&mut self, timeout: Option<f64>, deadline: Option<f64>, out: &mut Vec<Ready>, woke: &mut bool) {
         let n = (2 * self.fds.len() + 2).min(1024);
         if self.events.len() < n {
             self.events.resize(n, unsafe { std::mem::zeroed() });
@@ -428,19 +500,24 @@ impl Reactor {
             change.filter = libc::EVFILT_TIMER;
             match timeout {
                 Some(t) if t > 0.0 => {
-                    // (re)arms the timer; the wait itself has no timeout
-                    change.flags = libc::EV_ADD | libc::EV_ONESHOT;
-                    change.fflags = libc::NOTE_NSECONDS | libc::NOTE_CRITICAL;
-                    change.data = (t * 1e9).ceil().min(i64::MAX as f64) as isize;
-                    nchanges = 1;
+                    // the wait itself has no timeout: the timer ends it; (re)armed unless it is
+                    // armed for this deadline already (NaN never compares equal)
                     tsp = std::ptr::null();
-                    self.timer_armed = true;
+                    let at = deadline.unwrap_or(f64::NAN);
+                    if self.timer_armed != Some(at) {
+                        change.flags = libc::EV_ADD | libc::EV_ONESHOT;
+                        change.fflags = libc::NOTE_NSECONDS | libc::NOTE_CRITICAL;
+                        change.data = (t * 1e9).ceil().min(i64::MAX as f64) as isize;
+                        nchanges = 1;
+                        self.timer_armed = Some(at);
+                    }
                 }
-                _ if self.timer_armed => {
-                    // a stale timer would end a later wait early (ENOENT if it fired: ignored)
+                None if self.timer_armed.is_some() => {
+                    // a stale timer would end a wait without timeout early (ENOENT if it
+                    // fired: ignored); a non-blocking poll leaves it armed (it ends no wait)
                     change.flags = libc::EV_DELETE;
                     nchanges = 1;
-                    self.timer_armed = false;
+                    self.timer_armed = None;
                 }
                 _ => {}
             }
@@ -461,7 +538,7 @@ impl Reactor {
             }
             #[cfg(target_os = "macos")]
             if ev.filter == libc::EVFILT_TIMER {
-                self.timer_armed = false;
+                self.timer_armed = None;
                 continue;
             }
             let rd = ev.filter == libc::EVFILT_READ;
@@ -541,6 +618,10 @@ impl Drop for Reactor {
         #[cfg(unix)]
         if self.poller >= 0 && self.fork_gen == FORK_GEN.load(Ordering::Relaxed) {
             unsafe { libc::close(self.poller) };
+        }
+        #[cfg(target_os = "linux")]
+        if self.timer_fd >= 0 {
+            unsafe { libc::close(self.timer_fd) };
         }
     }
 }

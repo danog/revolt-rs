@@ -461,10 +461,13 @@ fn dispatch_native(c: &mut Core, mut blocking: bool) {
             blocking = false;
         }
     }
-    let timeout = if blocking { c.timers.peek().map(|e| (e - clock::now()).max(0.0)) } else { Some(0.0) };
+    let deadline = if blocking { c.timers.peek() } else { None };
+    let timeout = if blocking { deadline.map(|e| (e - clock::now()).max(0.0)) } else { Some(0.0) };
     let mut ready = std::mem::take(&mut c.ready_buf);
     ready.clear();
-    let woke = c.reactor.poll(timeout, &mut ready);
+    // the deadline on the loop clock (a PHP now() override's timers are on its own clock)
+    let deadline = deadline.filter(|_| c.hooks.now.is_none());
+    let woke = c.reactor.poll(timeout, deadline, &mut ready);
     for &(fd, rd, wr) in &ready {
         let Some(e) = c.reactor.fds.get(&fd) else { continue };
         if rd {
