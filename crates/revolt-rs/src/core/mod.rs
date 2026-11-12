@@ -165,6 +165,8 @@ pub struct Record {
     pub qgen: u32,
     /// activated in the reactor (fd registered / timer in the heap / signal watched)
     pub active: bool,
+    /// its index in the reactor's `php_readers` (u32::MAX: not there)
+    pub reader_idx: u32,
     /// the DriverCallback object handed to PHP code (userland drivers), or null
     pub view: *mut sys::zend_object,
 }
@@ -553,6 +555,7 @@ impl Core {
             queued: false,
             qgen: 0,
             active: false,
+            reader_idx: u32::MAX,
             view: null_mut(),
         })
     }

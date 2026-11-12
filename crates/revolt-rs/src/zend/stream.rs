@@ -68,3 +68,32 @@ pub unsafe fn has_buffered(z: *mut sys::zval) -> bool {
     let s = of(z);
     !s.is_null() && (*s).writepos > (*s).readpos
 }
+
+/// The resource of a stream zval (borrowed), or null.
+pub unsafe fn resource(z: *mut sys::zval) -> *mut sys::zend_resource {
+    let z = zval::deref(z);
+    if zval::ty(z) == zval::RESOURCE {
+        (*z).value.res
+    } else {
+        std::ptr::null_mut()
+    }
+}
+
+/// The resource types of streams (le_stream, le_pstream), looked up once.
+static mut LE: (i32, i32) = (0, 0);
+
+/// Whether a stream resource (alive: someone holds it) has data in PHP's read buffer; false once
+/// it was closed.
+#[inline]
+pub unsafe fn res_buffered(res: *mut sys::zend_resource) -> bool {
+    let le = std::ptr::addr_of_mut!(LE);
+    if (*le).0 == 0 {
+        *le = (sys::php_file_le_stream(), sys::php_file_le_pstream());
+    }
+    let t = (*res).type_;
+    if t != (*le).0 && t != (*le).1 {
+        return false;
+    }
+    let s = (*res).ptr as *mut sys::php_stream;
+    (*s).writepos > (*s).readpos
+}

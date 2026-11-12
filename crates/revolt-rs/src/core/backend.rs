@@ -128,8 +128,9 @@ impl FdEntry {
 
 pub struct Reactor {
     pub fds: HashMap<i64, FdEntry, BuildHasherDefault<super::IdHasher>>,
-    /// the active readable callbacks of PHP streams (whose read buffers a blocking poll checks)
-    pub stream_readers: usize,
+    /// the active readable callbacks of PHP streams with their resources (whose read buffers a
+    /// blocking poll checks: a dense list, scanned without lookups)
+    pub php_readers: Vec<(super::Cid, *mut crate::zend::sys::zend_resource)>,
     /// the entries marked `always` (so that a poll looks for them only when there are some)
     n_always: usize,
     dirty: Vec<i64>,
@@ -212,7 +213,7 @@ impl Reactor {
     pub fn new() -> Reactor {
         Reactor {
             fds: HashMap::default(),
-            stream_readers: 0,
+            php_readers: Vec::new(),
             n_always: 0,
             dirty: Vec::new(),
             #[cfg(unix)]

@@ -401,7 +401,9 @@ fn activate_native(c: &mut Core, cid: Cid) -> Result<(), ActivateError> {
             r.active = true;
             c.reactor.add(h.fd, h.socket, h.res, cid, dir);
             if dir == backend::READ && !zval::is_null(&r.stream.0) {
-                c.reactor.stream_readers += 1;
+                let res = unsafe { stream::resource(&mut *r.stream.0) };
+                r.reader_idx = c.reactor.php_readers.len() as u32;
+                c.reactor.php_readers.push((cid, res));
             }
         }
         Kind::Delay | Kind::Repeat => {
@@ -445,7 +447,7 @@ fn deactivate(d: D, id: u64) -> bool {
 /// reactor: no borrow of the record meanwhile).
 enum Deactivation {
     None,
-    Fd { fd: i64, id: u64, dir: u8, php_reader: bool },
+    Fd { fd: i64, id: u64, dir: u8, php_reader: u32 },
     Timer { slot: u32 },
     Signal { sig: i32, id: u64 },
 }
@@ -462,7 +464,7 @@ fn deactivation(r: &mut super::Record) -> Deactivation {
                 fd: h.fd,
                 id: r.id,
                 dir: if r.kind == Kind::Readable { backend::READ } else { backend::WRITE },
-                php_reader: r.kind == Kind::Readable && !zval::is_null(&r.stream.0),
+                php_reader: std::mem::replace(&mut r.reader_idx, u32::MAX),
             },
             None => Deactivation::None,
         },
@@ -477,8 +479,14 @@ fn deactivate_apply(c: &mut Core, d: Deactivation) {
         Deactivation::None => {}
         Deactivation::Fd { fd, id, dir, php_reader } => {
             c.reactor.del(fd, id, dir);
-            if php_reader {
-                c.reactor.stream_readers -= 1;
+            if php_reader != u32::MAX {
+                let rs = &mut c.reactor.php_readers;
+                rs.swap_remove(php_reader as usize);
+                if let Some(&(moved, _)) = rs.get(php_reader as usize) {
+                    if let Some(m) = c.callbacks.at_id(moved) {
+                        m.reader_idx = php_reader;
+                    }
+                }
             }
         }
         Deactivation::Timer { slot } => c.timers.remove(slot),
@@ -573,36 +581,18 @@ fn dispatch_native(c: &mut Core, mut blocking: bool) {
     }
 }
 
-/// Whether `r` is a readable callback of a stream with data in PHP's read buffer.
-#[inline]
-fn is_buffered(r: &mut super::Record) -> bool {
-    !zval::is_null(&r.stream.0) && unsafe { stream::has_buffered(&mut *r.stream.0) }
-}
-
 /// The readable callbacks of streams with data in PHP's read buffers (stream_select reports
-/// such streams readable at once), into `out` (cleared first).
+/// such streams readable at once), into `out` (cleared first). Raw handles (embedders' sockets)
+/// have no PHP buffers.
 fn buffered_readers(c: &mut Core, out: &mut Vec<Cid>) {
     out.clear();
-    if c.reactor.stream_readers == 0 {
-        // only raw handles (embedders' sockets): no PHP buffers
-        return;
-    }
-    for e in c.reactor.fds.values() {
-        for &cid in &e.readers {
-            if c.callbacks.at_id(cid).is_some_and(is_buffered) {
-                out.push(cid);
-            }
-        }
-    }
+    // SAFETY: the records hold their resources while they are listed
+    out.extend(c.reactor.php_readers.iter().filter(|&&(_, res)| unsafe { stream::res_buffered(res) }).map(|&(cid, _)| cid));
 }
 
 /// Whether some readable callback's stream has data in PHP's read buffer.
 fn any_buffered(c: &mut Core) -> bool {
-    if c.reactor.stream_readers == 0 {
-        return false;
-    }
-    let recs = &mut c.callbacks;
-    c.reactor.fds.values().any(|e| e.readers.iter().any(|&cid| recs.at_id(cid).is_some_and(is_buffered)))
+    c.reactor.php_readers.iter().any(|&(_, res)| unsafe { stream::res_buffered(res) })
 }
 
 fn enqueue_signals(c: &mut Core, sigs: &[i32]) {
