@@ -143,17 +143,20 @@ unsafe extern "C" fn construct(ex: Ex, _rv: *mut sys::zval) {
 }
 
 unsafe extern "C" fn resume(ex: Ex, _rv: *mut sys::zval) {
-    let mut v: *mut sys::zval = null_mut();
-    if call::num_args(ex) > 0 && !zpp!(ex, "|z", &mut v) {
-        return;
-    }
-    let value = if v.is_null() { Zv::null() } else { Zv(zval::copy_deref(v)) };
+    // resume(mixed $value = null): any value, no parsing needed
+    let value = if call::num_args(ex) > 0 { Zv(zval::copy_deref(call::arg(ex, 0))) } else { Zv::null() };
     wake(call::this(ex), value, false);
 }
 
 unsafe extern "C" fn throw(ex: Ex, _rv: *mut sys::zval) {
     let mut e: *mut sys::zval = null_mut();
-    if !zpp!(ex, "O", &mut e, sys::zend_ce_throwable) {
+    if call::num_args(ex) > 0 {
+        let a = call::arg(ex, 0);
+        if zval::ty(a) == zval::OBJECT && call::instance_of((*(*a).value.obj).ce, sys::zend_ce_throwable) {
+            e = a;
+        }
+    }
+    if e.is_null() && !zpp!(ex, "O", &mut e, sys::zend_ce_throwable) {
         return;
     }
     wake(call::this(ex), Zv(zval::copy(e)), true);
