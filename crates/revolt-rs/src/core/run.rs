@@ -452,17 +452,7 @@ fn dispatch_native(c: &mut Core, mut blocking: bool) {
         blocking = false;
     }
     if blocking {
-        // data in PHP's read buffers: stream_select reports such streams readable at once
-        let mut buffered = Vec::new();
-        for e in c.reactor.fds.values() {
-            for &id in &e.readers {
-                if let Some(r) = c.callbacks.get_mut(&id) {
-                    if !zval::is_null(&r.stream.0) && unsafe { stream::has_buffered(&mut *r.stream.0) } {
-                        buffered.push(id);
-                    }
-                }
-            }
-        }
+        let mut buffered = buffered_readers(c);
         if !buffered.is_empty() {
             buffered.sort_unstable();
             for id in buffered {
@@ -502,6 +492,22 @@ fn dispatch_native(c: &mut Core, mut blocking: bool) {
     }
 }
 
+/// The readable callbacks of streams with data in PHP's read buffers (stream_select reports
+/// such streams readable at once).
+fn buffered_readers(c: &mut Core) -> Vec<u64> {
+    let mut buffered = Vec::new();
+    for e in c.reactor.fds.values() {
+        for &id in &e.readers {
+            if let Some(r) = c.callbacks.get_mut(&id) {
+                if !zval::is_null(&r.stream.0) && unsafe { stream::has_buffered(&mut *r.stream.0) } {
+                    buffered.push(id);
+                }
+            }
+        }
+    }
+    buffered
+}
+
 fn enqueue_signals(c: &mut Core, sigs: &[i32]) {
     for s in sigs {
         if let Some(ids) = c.signals.by_signal.get(s) {
@@ -528,7 +534,21 @@ fn tick(d: D, previous_idle: bool) -> Option<Phase> {
         c.set_invokable(id, true);
         c.enqueue(id);
     }
-    let blocking = previous_idle && !c.stopped && c.live > 0;
+    // Revolt polls without blocking after a tick that ran callbacks, then blocks in the next
+    // tick if that poll found nothing. With nothing queued now, nothing can run between those
+    // two polls, so one blocking poll gives the same result (it returns at once for what the
+    // first would have found) without the extra system call. Not with PHP overrides of
+    // activate()/dispatch()/now() (they see every tick), nor with buffered stream data (the
+    // blocking poll reports it before the ready fds, the non-blocking one after them).
+    let h = &c.hooks;
+    let quiet = !previous_idle
+        && c.callback_queue.is_empty()
+        && c.microtasks.is_empty()
+        && h.activate.is_none()
+        && h.dispatch.is_none()
+        && h.now.is_none()
+        && buffered_readers(c).is_empty();
+    let blocking = (previous_idle || quiet) && !c.stopped && c.live > 0;
     if blocking {
         c.tick_blocking = true;
         return Some(Phase::TickInvoke);
