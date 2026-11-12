@@ -9,6 +9,8 @@
 //!   reports them.
 //! - fork(): a child rebuilds its poller on first use (an inherited epoll instance is shared with
 //!   the parent; kqueues are not inherited).
+//! - macOS: kevent64() (a poll that does not wait costs ~0.15 µs; kevent() with a zero timeout
+//!   ~12 µs).
 //! - macOS: timed waits go through a one-shot EVFILT_TIMER with NOTE_CRITICAL (kqueue even when
 //!   no fd is watched): the system's timer coalescing otherwise delays nanosleep()/kevent()
 //!   wake-ups by up to 10% of the timeout (more for background processes).
@@ -140,7 +142,7 @@ pub struct Reactor {
     #[cfg(target_os = "linux")]
     events: Vec<libc::epoll_event>,
     #[cfg(all(unix, not(target_os = "linux")))]
-    events: Vec<libc::kevent>,
+    events: Vec<Kev>,
     /// the deadline (loop clock) the wait timer is armed for, while it may be (it has not been
     /// seen firing); NaN: armed for a wait without a known deadline (macOS)
     #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -161,6 +163,47 @@ pub struct Reactor {
 /// macOS: the ident of the wait timer (EVFILT_TIMER idents are not fds)
 #[cfg(target_os = "macos")]
 const WAIT_TIMER: usize = usize::MAX;
+
+/// macOS: kevent64(), whose KEVENT_FLAG_IMMEDIATE makes a poll without waiting cost ~0.15 µs
+/// (kevent() with a zero timeout costs ~12 µs: it sets up a kernel timer). A kqueue takes one
+/// flavour of kevent call only (another one fails with EINVAL): every call goes through `kev`.
+#[cfg(target_os = "macos")]
+type Kev = libc::kevent64_s;
+#[cfg(all(unix, not(any(target_os = "linux", target_os = "macos"))))]
+type Kev = libc::kevent;
+
+/// A change for `kev` (plain data otherwise zero).
+#[cfg(all(unix, not(target_os = "linux")))]
+fn kev_change(ident: i64, filter: i16, flags: u16) -> Kev {
+    // SAFETY: kevent structures are plain data
+    let mut k: Kev = unsafe { std::mem::zeroed() };
+    k.ident = ident as _;
+    k.filter = filter;
+    k.flags = flags;
+    k
+}
+
+/// kevent64()/kevent(): `changes`, then up to `events.len()` events; waits for `timeout` (None:
+/// no limit; Some(zero): not at all).
+#[cfg(all(unix, not(target_os = "linux")))]
+fn kev(kq: i32, changes: &[Kev], events: &mut [Kev], timeout: Option<&libc::timespec>) -> i32 {
+    #[cfg(target_os = "macos")]
+    {
+        let (flags, tsp) = match timeout {
+            Some(t) if t.tv_sec == 0 && t.tv_nsec == 0 => (libc::KEVENT_FLAG_IMMEDIATE, std::ptr::null()),
+            Some(t) => (0, t as *const libc::timespec),
+            None => (0, std::ptr::null()),
+        };
+        // SAFETY: valid buffers of the given lengths
+        unsafe { libc::kevent64(kq, changes.as_ptr(), changes.len() as i32, events.as_mut_ptr(), events.len() as i32, flags, tsp) }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let tsp = timeout.map_or(std::ptr::null(), |t| t as *const libc::timespec);
+        // SAFETY: valid buffers of the given lengths
+        unsafe { libc::kevent(kq, changes.as_ptr(), changes.len() as i32, events.as_mut_ptr(), events.len() as i32, tsp) }
+    }
+}
 
 /// A ready fd: (fd, readable, writable)
 pub type Ready = (i64, bool, bool);
@@ -431,22 +474,13 @@ impl Reactor {
             if !self.ensure_poller() {
                 return Err(errno());
             }
-            let kev = |filter, flags| {
-                // SAFETY: kevent is plain data
-                let mut k: libc::kevent = unsafe { std::mem::zeroed() };
-                k.ident = p.fd as usize;
-                k.filter = filter;
-                k.flags = flags;
-                k
-            };
-            let ch = [kev(libc::EVFILT_READ, libc::EV_ADD | libc::EV_CLEAR), kev(libc::EVFILT_WRITE, libc::EV_ADD | libc::EV_ONESHOT)];
-            let changes: &[libc::kevent] = match (registered, write) {
+            let ch = [kev_change(p.fd, libc::EVFILT_READ, libc::EV_ADD | libc::EV_CLEAR), kev_change(p.fd, libc::EVFILT_WRITE, libc::EV_ADD | libc::EV_ONESHOT)];
+            let changes: &[Kev] = match (registered, write) {
                 (false, true) => &ch,
                 (false, false) => &ch[..1],
                 (true, _) => &ch[1..],
             };
-            // SAFETY: a valid changelist, no event list
-            if unsafe { libc::kevent(self.poller, changes.as_ptr(), changes.len() as libc::c_int, std::ptr::null_mut(), 0, std::ptr::null()) } < 0 {
+            if kev(self.poller, changes, &mut [], None) < 0 {
                 return Err(errno());
             }
         }
@@ -672,23 +706,20 @@ impl Reactor {
         if !self.ensure_poller() {
             return false;
         }
-        let mut changes: [libc::kevent; 2] = unsafe { std::mem::zeroed() };
+        let mut changes = [kev_change(fd, 0, 0); 2];
         let mut n = 0;
         for (bit, filter) in [(READ, libc::EVFILT_READ), (WRITE, libc::EVFILT_WRITE)] {
             // a fresh registration (had 0) also drops a filter left from a reused fd number
             if (had ^ want) & bit != 0 || (had == 0 && want & bit == 0) {
-                let c = &mut changes[n];
-                c.ident = fd as usize;
-                c.filter = filter;
-                c.flags = (if want & bit != 0 { libc::EV_ADD } else { libc::EV_DELETE }) | libc::EV_RECEIPT;
+                changes[n] = kev_change(fd, filter, (if want & bit != 0 { libc::EV_ADD } else { libc::EV_DELETE }) | libc::EV_RECEIPT);
                 n += 1;
             }
         }
         if n == 0 {
             return true;
         }
-        let mut res: [libc::kevent; 2] = unsafe { std::mem::zeroed() };
-        let r = unsafe { libc::kevent(self.poller, changes.as_ptr(), n as i32, res.as_mut_ptr(), n as i32, std::ptr::null()) };
+        let mut res = [kev_change(0, 0, 0); 2];
+        let r = kev(self.poller, &changes[..n], &mut res[..n], None);
         if r < 0 {
             return want == 0;
         }
@@ -809,51 +840,44 @@ impl Reactor {
     fn poll_os(&mut self, timeout: Option<f64>, deadline: Option<f64>, out: &mut Vec<Ready>, woke: &mut bool) {
         let n = (2 * (self.fds.len() + self.src.len()) + 2).min(1024);
         if self.events.len() < n {
-            self.events.resize(n, unsafe { std::mem::zeroed() });
+            self.events.resize(n, kev_change(0, 0, 0));
         }
-        let ts;
+        let ts = timeout.map(|t| {
+            let t = t.max(0.0);
+            libc::timespec { tv_sec: t.trunc() as libc::time_t, tv_nsec: (t.fract() * 1e9) as libc::c_long }
+        });
         #[cfg_attr(not(target_os = "macos"), allow(unused_mut))]
-        let mut tsp = match timeout {
-            None => std::ptr::null(),
-            Some(t) => {
-                let t = t.max(0.0);
-                ts = libc::timespec { tv_sec: t.trunc() as libc::time_t, tv_nsec: (t.fract() * 1e9) as libc::c_long };
-                &ts as *const libc::timespec
-            }
-        };
+        let mut wait = ts.as_ref();
         #[cfg_attr(not(target_os = "macos"), allow(unused_mut))]
-        let mut change: libc::kevent = unsafe { std::mem::zeroed() };
-        #[cfg_attr(not(target_os = "macos"), allow(unused_mut))]
-        let mut nchanges = 0;
+        let mut change: &[Kev] = &[];
         #[cfg(target_os = "macos")]
-        {
-            change.ident = WAIT_TIMER;
-            change.filter = libc::EVFILT_TIMER;
-            match timeout {
-                Some(t) if t > 0.0 => {
-                    // the wait itself has no timeout: the timer ends it; (re)armed unless it is
-                    // armed for this deadline already (NaN never compares equal)
-                    tsp = std::ptr::null();
-                    let at = deadline.unwrap_or(f64::NAN);
-                    if self.timer_armed != Some(at) {
-                        change.flags = libc::EV_ADD | libc::EV_ONESHOT;
-                        change.fflags = libc::NOTE_NSECONDS | libc::NOTE_CRITICAL;
-                        change.data = (t * 1e9).ceil().min(i64::MAX as f64) as isize;
-                        nchanges = 1;
-                        self.timer_armed = Some(at);
-                    }
+        let timer;
+        #[cfg(target_os = "macos")]
+        match timeout {
+            Some(t) if t > 0.0 => {
+                // the wait itself has no timeout: the timer ends it; (re)armed unless it is
+                // armed for this deadline already (NaN never compares equal)
+                wait = None;
+                let at = deadline.unwrap_or(f64::NAN);
+                if self.timer_armed != Some(at) {
+                    let mut k = kev_change(WAIT_TIMER as i64, libc::EVFILT_TIMER, libc::EV_ADD | libc::EV_ONESHOT);
+                    k.fflags = libc::NOTE_NSECONDS | libc::NOTE_CRITICAL;
+                    k.data = (t * 1e9).ceil().min(i64::MAX as f64) as _;
+                    timer = [k];
+                    change = &timer;
+                    self.timer_armed = Some(at);
                 }
-                None if self.timer_armed.is_some() => {
-                    // a stale timer would end a wait without timeout early (ENOENT if it
-                    // fired: ignored); a non-blocking poll leaves it armed (it ends no wait)
-                    change.flags = libc::EV_DELETE;
-                    nchanges = 1;
-                    self.timer_armed = None;
-                }
-                _ => {}
             }
+            None if self.timer_armed.is_some() => {
+                // a stale timer would end a wait without timeout early (ENOENT if it
+                // fired: ignored); a non-blocking poll leaves it armed (it ends no wait)
+                timer = [kev_change(WAIT_TIMER as i64, libc::EVFILT_TIMER, libc::EV_DELETE)];
+                change = &timer;
+                self.timer_armed = None;
+            }
+            _ => {}
         }
-        let r = unsafe { libc::kevent(self.poller, &change, nchanges, self.events.as_mut_ptr(), self.events.len() as i32, tsp) };
+        let r = kev(self.poller, change, &mut self.events, wait);
         if r <= 0 {
             return;
         }
