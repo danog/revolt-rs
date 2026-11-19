@@ -978,6 +978,9 @@ unsafe fn invoke_callback(d: D, cid: Cid) -> bool {
     !call::has_exception()
 }
 
+/// Arguments a microtask gives to its call that stay on the stack (more: one allocation).
+const TRANSFER_INLINE: usize = 8;
+
 /// invokeMicrotasks(); false when the fiber must end.
 fn invoke_microtasks(d: D) -> bool {
     loop {
@@ -994,20 +997,39 @@ fn invoke_microtasks(d: D) -> bool {
                         }
                         continue;
                     };
-                    // the closure, the named arguments, then the arguments: held where the
-                    // cycle collector sees them while the call runs
                     let (mut closure, mut named) = (closure, named);
+                    let nargs = nargs as usize;
                     let queued = &mut c.microtask_args;
                     // (pop_front: a Drain's drop is not free, even for none)
-                    let args = (0..nargs).map(|_| queued.pop_front().map_or_else(zval::undef, |mut a| a.take()));
-                    let (p, n) = fiber::inflight::hold(fiber, [closure.take(), named.take()].into_iter().chain(args));
-                    let named_ht = if zval::ty(&*p.add(1)) == zval::ARRAY { (&*p.add(1)).value.arr } else { null_mut() };
-                    let params = std::slice::from_raw_parts_mut(p.add(2), n - 2);
-                    // the arguments go to the call (Revolt clears $args before the closure runs):
+                    let mut args = (0..nargs).map(|_| queued.pop_front().map_or_else(zval::undef, |mut a| a.take()));
+                    // The arguments go to the call (Revolt clears $args before the closure runs):
                     // the call's frame holds the only references (the engine adds one per
                     // argument, ours are given up first), so an argument the closure unsets is
-                    // destroyed at once
-                    let transfer = !takes_references(callee.func, params.len());
+                    // destroyed at once. Given up, they are not held either: the held values are
+                    // reported to the cycle collector as references of the fiber, which would
+                    // then count each argument twice (the call's frame reports it too), and
+                    // visit the freed one once the closure drops it.
+                    // By reference, the call's frame refers to ours: held (and released) here.
+                    let transfer = !takes_references(callee.func, nargs);
+                    let mut inline: [zval::Z; TRANSFER_INLINE] = std::array::from_fn(|_| zval::undef());
+                    let mut heap = Vec::new();
+                    let (p, n) = if transfer {
+                        fiber::inflight::hold(fiber, [closure.take(), named.take()])
+                    } else {
+                        fiber::inflight::hold(fiber, [closure.take(), named.take()].into_iter().chain(args.by_ref()))
+                    };
+                    let named_ht = if zval::ty(&*p.add(1)) == zval::ARRAY { (&*p.add(1)).value.arr } else { null_mut() };
+                    let params: &mut [zval::Z] = if !transfer {
+                        std::slice::from_raw_parts_mut(p.add(2), n - 2)
+                    } else if nargs <= TRANSFER_INLINE {
+                        for (slot, a) in inline.iter_mut().zip(args) {
+                            *slot = a;
+                        }
+                        &mut inline[..nargs]
+                    } else {
+                        heap.extend(args);
+                        &mut heap
+                    };
                     if transfer {
                         for a in params.iter_mut() {
                             if zval::is_refcounted(&*a) {
@@ -1016,13 +1038,10 @@ fn invoke_microtasks(d: D) -> bool {
                         }
                     }
                     drop(call::call(&callee, params, named_ht));
+                    // (transferred arguments: released by the call)
                     let mut held = fiber::inflight::take(fiber);
                     let closure = Zv(zval::take(&mut held[0]));
-                    for (i, z) in held[1..].iter_mut().enumerate() {
-                        if transfer && i >= 1 {
-                            // given to the call, which released them
-                            continue;
-                        }
+                    for z in held[1..].iter_mut() {
                         zval::dtor(z);
                     }
                     if call::has_exception() {

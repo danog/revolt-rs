@@ -55,6 +55,44 @@ final class GcTest extends TestCase
         self::assertNull($ref->get());
     }
 
+    /**
+     * A queued closure's arguments are its call's alone: one it drops is destroyed at once,
+     * and the cycle collector, run meanwhile with the callback fiber as a root, never visits
+     * it (a use after free that corrupted the allocator's free lists: ASan reports it).
+     */
+    public function testQueuedArgumentDroppedBeforeCollection(): void
+    {
+        $refs = [];
+        $driver = Drivers::create();
+        for ($i = 0; $i < 3; $i++) {
+            $object = new \stdClass();
+            $refs[] = \WeakReference::create($object);
+            $driver->queue(static function (array $a, \stdClass $o) use (&$refs, $i): void {
+                $a = null;
+                $o = null;
+                self::assertNull($refs[$i]->get());
+                // the callback fiber becomes a possible root
+                \Fiber::getCurrent();
+                \gc_collect_cycles();
+            }, [new \stdClass(), \str_repeat('x', 3)], $object);
+            unset($object);
+        }
+        $more = [];
+        for ($i = 0; $i < 10; $i++) {
+            $more[] = new \stdClass();
+        }
+        $driver->queue(static function (\stdClass ...$objects): void {
+            $objects = null;
+            \Fiber::getCurrent();
+            \gc_collect_cycles();
+        }, ...$more);
+        unset($more);
+        $driver->run();
+        foreach ($refs as $ref) {
+            self::assertNull($ref->get());
+        }
+    }
+
     public function testFiberLocalCollected(): void
     {
         $local = new EventLoop\FiberLocal(static fn () => new \stdClass());
