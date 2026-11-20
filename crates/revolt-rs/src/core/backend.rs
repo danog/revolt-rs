@@ -7,8 +7,6 @@
 //!   disabling a watcher between two polls costs no system call.
 //! - fds the poller refuses (regular files on epoll, closed fds) are "always ready", as select
 //!   reports them.
-//! - fork(): a child rebuilds its poller on first use (an inherited epoll instance is shared with
-//!   the parent; kqueues are not inherited).
 //! - macOS: kevent64() (a poll that does not wait costs ~0.15 µs; kevent() with a zero timeout
 //!   ~12 µs).
 //! - macOS: timed waits go through a one-shot EVFILT_TIMER with NOTE_CRITICAL (kqueue even when
@@ -32,9 +30,6 @@
 
 use std::collections::HashMap;
 use std::hash::BuildHasherDefault;
-use std::sync::atomic::AtomicU64;
-#[cfg(unix)]
-use std::sync::atomic::Ordering;
 
 pub const READ: u8 = 1;
 pub const WRITE: u8 = 2;
@@ -85,25 +80,6 @@ struct SrcEntry {
     token: u64,
 }
 
-/// Bumped in fork() children (pthread_atfork).
-pub static FORK_GEN: AtomicU64 = AtomicU64::new(0);
-
-#[cfg(unix)]
-extern "C" fn atfork_child() {
-    FORK_GEN.fetch_add(1, Ordering::SeqCst);
-}
-
-/// MINIT: the fork hook (once per process).
-pub fn minit() {
-    #[cfg(unix)]
-    {
-        static ONCE: std::sync::Once = std::sync::Once::new();
-        ONCE.call_once(|| unsafe {
-            libc::pthread_atfork(None, None, Some(atfork_child));
-        });
-    }
-}
-
 #[derive(Default)]
 pub struct FdEntry {
     pub readers: Vec<super::Cid>,
@@ -138,8 +114,6 @@ pub struct Reactor {
     spare: Vec<Vec<super::Cid>>,
     #[cfg(unix)]
     poller: i32,
-    #[cfg(unix)]
-    fork_gen: u64,
     /// the read end of the signal wake pipe, polled too
     wake: i64,
     #[cfg(target_os = "linux")]
@@ -221,8 +195,6 @@ impl Reactor {
             spare: Vec::new(),
             #[cfg(unix)]
             poller: -1,
-            #[cfg(unix)]
-            fork_gen: FORK_GEN.load(Ordering::Relaxed),
             wake: -1,
             #[cfg(unix)]
             events: Vec::new(),
@@ -347,8 +319,6 @@ impl Reactor {
         if self.group_mut(g).is_none() {
             return Err(libc::EBADF);
         }
-        #[cfg(unix)]
-        self.check_fork();
         let mut hit = false;
         for p in fds.iter().filter(|p| p.fd >= 0) {
             if let Some(e) = self.src.get_mut(&p.fd) {
@@ -554,7 +524,6 @@ impl Reactor {
     /// `deadline` on the loop clock when it is known; appends the ready fds to `out`; returns
     /// whether the wake pipe was signalled. EINTR returns at once, empty.
     pub fn poll(&mut self, timeout: Option<f64>, deadline: Option<f64>, out: &mut Vec<Ready>) -> bool {
-        self.check_fork();
         self.apply();
         let mut timeout = timeout;
         if self.n_always > 0 {
@@ -593,58 +562,6 @@ impl Reactor {
             woke
         }
     }
-
-    #[cfg(unix)]
-    fn check_fork(&mut self) {
-        let g = FORK_GEN.load(Ordering::Relaxed);
-        if g == self.fork_gen {
-            return;
-        }
-        self.fork_gen = g;
-        if self.poller >= 0 {
-            // epoll: the instance is shared with the parent, never touch it again; kqueue: the
-            // fd is not inherited at all (its number may be reused): never close it
-            #[cfg(target_os = "linux")]
-            unsafe {
-                libc::close(self.poller)
-            };
-            self.poller = -1;
-            #[cfg(any(target_os = "linux", target_os = "macos"))]
-            {
-                self.timer_armed = None;
-            }
-        }
-        // the timerfd is shared with the parent too: arming it would move the parent's timer
-        #[cfg(target_os = "linux")]
-        if self.timer_fd >= 0 {
-            unsafe { libc::close(self.timer_fd) };
-            self.timer_fd = -1;
-        }
-        for (&fd, e) in self.fds.iter_mut() {
-            e.registered = 0;
-            e.always = false;
-            if !e.dirty {
-                e.dirty = true;
-                self.dirty.push(fd);
-            }
-        }
-        self.n_always = 0;
-        // the sources are registered anew at their next wait (an armed one now: at once)
-        let armed: Vec<SrcFd> = self.src.iter().filter(|(_, e)| e.want != 0).map(|(&fd, e)| SrcFd { fd, events: e.want as u32 }).collect();
-        for e in self.src.values_mut() {
-            e.registered = false;
-        }
-        for p in armed {
-            let (g, token) = self.src.get(&p.fd).map(|e| (e.group, e.token)).unwrap_or_default();
-            if self.src_watch(g, &p, token).is_err() {
-                // report it to its waiter, which finds out what is wrong when it retries
-                self.src_event(p.fd, READ | WRITE | ERR);
-            }
-        }
-    }
-
-    #[cfg(windows)]
-    fn check_fork(&mut self) {}
 
     /// Brings the poller's interest in line with the watchers.
     fn apply(&mut self) {
@@ -1060,7 +977,7 @@ impl Reactor {
 impl Drop for Reactor {
     fn drop(&mut self) {
         #[cfg(unix)]
-        if self.poller >= 0 && self.fork_gen == FORK_GEN.load(Ordering::Relaxed) {
+        if self.poller >= 0 {
             unsafe { libc::close(self.poller) };
         }
         #[cfg(target_os = "linux")]

@@ -11,7 +11,7 @@ EMBEDDING.md, DIVERGENCES.md.
   RevoltRs\Tests). Divergence tests use the `NativeOnly` trait (skip under the baseline);
   everything else in tests/native also passes against the PHP library
   (`REVOLT_RS_PHPLIB=1 tools/test.sh`), which is how parity was established for userland
-  drivers, user Driver via setDriver, TracingDriver dump, fork, GC of cycles, error handler
+  drivers, user Driver via setDriver, TracingDriver dump, GC of cycles, error handler
   exceptions, nested run(), exit() in a callback and shutdown with pending callbacks (phpt).
 - Embedding (M6): `examples/embedder` = extension `revolt_embed_example` (functions `_mode`,
   `_owner`, `_sleep`, `_wait_readable`, `_delay`, `_released`; env
@@ -113,8 +113,8 @@ reason, NOT in tests/NOT_APPLICABLE.md (which excludes everywhere).
 - 919552c: the wait timer is armed once per deadline: macOS keeps its EVFILT_TIMER/NOTE_CRITICAL
   across polls (re-armed only for another deadline, deleted only before a wait without timeout);
   Linux uses a timerfd (ABSTIME, CLOCK_MONOTONIC) in the epoll set, epoll_wait(-1): no per-wait
-  hrtimer, ns precision. fork children close the inherited timerfd
-  (ForkTest::testChildTimerDoesNotMoveTheParents fails without that on Linux).
+  hrtimer, ns precision. fork() is not supported (removed with ForkTest: nothing using revolt-rs
+  forks).
 - 93ad155: polls no longer scan every fd (PHP-buffer check only with PHP-stream readers, refused
   fds counted), fd map with the integer hasher.
 - Linux microbenchmark (TCP ping-pong, CPU us/op): blocking recv 6.17, epoll_wait(-1) 6.68,
