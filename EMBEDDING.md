@@ -197,8 +197,8 @@ nl.src_forget(fd);
 - Groups and sources are not Revolt callbacks: `getIdentifiers()`, `getInfo()` and
   `TracingDriver` do not see them.
 - A socket is a source or watched by callbacks (`on_readable`...), not both on one driver.
-- `fork()`: the child's poller is made anew; its sources are registered again at their next arm
-  (armed ones at once).
+- `fork()` is not supported: a forked child must not use the loop (the poller, the wait timer and
+  the signal pipe are shared with the parent, or not inherited).
 
 ### Idle loop: blocking instead of polling
 
