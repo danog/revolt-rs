@@ -8,7 +8,7 @@ name: Tests
 on:
   # documentation-only pushes do not run (nor cancel a running test run)
   push:
-    paths-ignore: ["*.md", "patches/README.md"]
+    paths-ignore: ["*.md"]
   pull_request:
   workflow_dispatch:
 
@@ -30,9 +30,6 @@ jobs:
         os: [ubuntu-24.04, macos-15, windows-2022]
         php: ["8.2", "8.3", "8.4", "8.5", "8.6"]
         ts: [nts, zts]
-        exclude:
-          # no Windows development pack is published for 8.6 before its release
-          - { os: windows-2022, php: "8.6" }
     defaults:
       run:
         shell: bash
