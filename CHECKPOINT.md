@@ -57,9 +57,8 @@ EMBEDDING.md, DIVERGENCES.md.
 The first run (f5552ad) failed everywhere; fixed since:
 - Linux: `apt-get install libclang-dev` hit a DNS failure; the runner image already has
   libclang, which is now used when present.
-- PHP 8.6: setup-php's 8.6 has API 20261112 (php-src bumped it after RC2); ext-php-rs-build
-  0.2.0 only accepts 20260924 → `patches/ext-php-rs-build` + `[patch.crates-io]` (remove once
-  an ext-php-rs-build release accepts it; embedders need the same patch).
+- PHP 8.6: API 20261112 (php-src bumped it after RC2), accepted by ext-php-rs-build 0.2.1 (0.2.0
+  only accepted 20260924, hence the patch this repository carried until then).
 - Windows: link errors for zend_ce_closure/module_registry/zend_empty_string (our own extern
   block in zend/sys.rs had no `#[link(name = "php8[ts]")]`, so no `__imp_` import).
 - macOS: upstream's timing tests (`testCorrectTimeoutIfBlocking*`, `testTimerIntervalCounted*`)
