@@ -196,8 +196,13 @@ nl.src_forget(fd);
 - Groups and sources are not Revolt callbacks: `getIdentifiers()`, `getInfo()` and
   `TracingDriver` do not see them.
 - A socket is a source or watched by callbacks (`on_readable`...), not both on one driver.
-- `fork()`: the child's poller is made anew; its sources are registered again at their next arm
-  (armed ones at once).
+- `fork()` (also from inside a running loop, as amphp/parallel's `ForkContext` does): the child
+  keeps a copy of the driver's state (callbacks, groups, sources, armed waits) but gets a poller,
+  a wait timer and a signal wake pipe of its own at its next poll (or its next arm that has to
+  register a source); it never makes a control call on the parent's epoll instance or kqueue,
+  and changes the parent had queued at the fork are not applied in the child (a pending removal
+  is the parent's registration). Its armed sources are registered with its poller at once, the
+  others at their next arm. Cost: one relaxed atomic load per poll.
 
 ### Idle loop: blocking instead of polling
 

@@ -114,6 +114,13 @@ reason, NOT in tests/NOT_APPLICABLE.md (which excludes everywhere).
   Linux uses a timerfd (ABSTIME, CLOCK_MONOTONIC) in the epoll set, epoll_wait(-1): no per-wait
   hrtimer, ns precision. fork children close the inherited timerfd
   (ForkTest::testChildTimerDoesNotMoveTheParents fails without that on Linux).
+- fork() from inside a running loop (amphp ForkContext, Psalm's pool): a child applied the
+  changes the parent had queued at the fork on the parent's epoll instance (an EPOLL_CTL_DEL of
+  the IPC listener the parent had just re-enabled: the parent never saw a connection again, a
+  hang). The child forgets every registration before its first apply (a pending removal is only
+  a map removal there), checks for the fork before set_wake() and an arm that registers, and
+  gets a wake pipe of its own (ForkTest::testChildDoesNotApplyTheParentsQueuedChanges fails
+  without the rebuild on Linux).
 - 93ad155: polls no longer scan every fd (PHP-buffer check only with PHP-stream readers, refused
   fds counted), fd map with the integer hasher.
 - Linux microbenchmark (TCP ping-pong, CPU us/op): blocking recv 6.17, epoll_wait(-1) 6.68,
