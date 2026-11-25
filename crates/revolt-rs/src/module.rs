@@ -45,6 +45,7 @@ pub unsafe fn minit(module_number: i32) -> bool {
 /// never owns them and only uses whatever implements them (another revolt-rs copy, or the PHP
 /// library through the PHP-call fallback of `crate::embed`).
 pub unsafe fn minit_with(_module_number: i32, register_classes: bool) -> bool {
+    crate::core::backend::minit();
     zend::fiber::minit();
     let ct = (*zend::cg()).class_table;
     if !register_classes || !zend::hash::find_str(ct, b"revolt\\eventloop").is_null() {

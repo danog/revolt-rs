@@ -91,6 +91,7 @@ mod imp {
         seen: Vec<(i32, u64)>,
         pipe: Option<(i32, i32)>,
         slot: Option<usize>,
+        fork_gen: u64,
     }
 
     impl Watchers {
@@ -147,6 +148,11 @@ mod imp {
         }
 
         fn ensure_pipe(&mut self) -> Result<(), i32> {
+            let g = super::super::backend::FORK_GEN.load(Ordering::Relaxed);
+            if self.pipe.is_some() && self.fork_gen != g {
+                // a fork() child: the pipe is shared with the parent
+                self.close_pipe();
+            }
             if self.pipe.is_some() {
                 return Ok(());
             }
@@ -170,6 +176,7 @@ mod imp {
             }
             self.slot = slot;
             self.pipe = Some((fds[0], fds[1]));
+            self.fork_gen = g;
             Ok(())
         }
 

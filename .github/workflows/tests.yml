@@ -42,7 +42,7 @@ jobs:
         with:
           php-version: ${{ matrix.php }}
           tools: composer
-          # pcntl and posix: the signal tests (Unix); mbstring: PHPUnit (Windows)
+          # pcntl and posix: the signal and fork tests (Unix); mbstring: PHPUnit (Windows)
           extensions: ${{ startsWith(matrix.os, 'windows') && 'sockets, mbstring' || 'sockets, pcntl, posix' }}
           ini-values: zend.assertions=1
           coverage: none
