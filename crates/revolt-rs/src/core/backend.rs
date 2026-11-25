@@ -7,8 +7,15 @@
 //!   disabling a watcher between two polls costs no system call.
 //! - fds the poller refuses (regular files on epoll, closed fds) are "always ready", as select
 //!   reports them.
-//! - fork(): a child rebuilds its poller on first use (an inherited epoll instance is shared with
-//!   the parent; kqueues are not inherited).
+//! - fork() (also from inside a running loop: amphp's ForkContext, Psalm's worker pool): the
+//!   child's state is a copy of the parent's, but an epoll instance and a timerfd are shared
+//!   with the parent and a kqueue is not inherited. A pthread_atfork child handler bumps
+//!   `FORK_GEN`; the child's next poll (or a call that would touch the poller) then drops the
+//!   inherited poller and timer without touching them (closing the child's copies only),
+//!   forgets every registration, and registers its own watchers and armed sources with a new
+//!   poller. Changes the parent had queued at the fork are not replayed: their removals were
+//!   the parent's registrations. Cost: one relaxed atomic load per poll; enabling, disabling
+//!   and re-arming a registered source check nothing.
 //! - macOS: kevent64() (a poll that does not wait costs ~0.15 µs; kevent() with a zero timeout
 //!   ~12 µs).
 //! - macOS: timed waits go through a one-shot EVFILT_TIMER with NOTE_CRITICAL (kqueue even when
@@ -283,6 +290,9 @@ impl Reactor {
         if self.wake == fd {
             return;
         }
+        // a fork child must not change the parent's poller (the old pipe's registration there is
+        // the parent's)
+        self.check_fork();
         #[cfg(unix)]
         if self.poller >= 0 {
             if self.wake >= 0 {
@@ -347,8 +357,6 @@ impl Reactor {
         if self.group_mut(g).is_none() {
             return Err(libc::EBADF);
         }
-        #[cfg(unix)]
-        self.check_fork();
         let mut hit = false;
         for p in fds.iter().filter(|p| p.fd >= 0) {
             if let Some(e) = self.src.get_mut(&p.fd) {
@@ -479,6 +487,9 @@ impl Reactor {
         if self.src_rearm(g, p, token, true) {
             return Ok(());
         }
+        // (a fork child re-arms on the fast path without a check: its next poll registers the
+        // source with its own poller)
+        self.check_fork();
         let registered = self.src.get(&p.fd).is_some_and(|e| e.registered);
         if !registered {
             if !self.ensure_poller() {
@@ -510,6 +521,7 @@ impl Reactor {
         if self.src_rearm(g, p, token, false) {
             return Ok(());
         }
+        self.check_fork();
         let registered = self.src.get(&p.fd).is_some_and(|e| e.registered);
         let write = p.events as u8 & WRITE != 0;
         if !registered || write {
@@ -594,6 +606,12 @@ impl Reactor {
         }
     }
 
+    /// In a fork() child (first call there): the inherited poller and wait timer are left to the
+    /// parent and every registration is forgotten, so the child's watchers go to a poller of its
+    /// own at the next apply. The changes queued at the fork go with that apply: a pending
+    /// removal (registered, no longer wanted) is a removal from the map only (nothing is
+    /// registered in the child's poller), a pending addition or change registers anew. The wake
+    /// pipe is the signal watchers' (`signal::Watchers::check_fork` replaces it).
     #[cfg(unix)]
     fn check_fork(&mut self) {
         let g = FORK_GEN.load(Ordering::Relaxed);

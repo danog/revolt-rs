@@ -147,12 +147,29 @@ mod imp {
             }
         }
 
-        fn ensure_pipe(&mut self) -> Result<(), i32> {
+        /// In a fork() child (first call there) that inherited signal watchers: their wake pipe
+        /// is the parent's (either process would drain the other's wake-ups, and the child's
+        /// handler would write to the parent's), so the child gets one of its own. True when
+        /// the pipe changed (the reactor must be given the new `wake_fd()`); if no pipe can be
+        /// made, signals are still seen at every tick and end a wait with EINTR, but a wait
+        /// can miss one that comes just before it.
+        pub fn check_fork(&mut self) -> bool {
             let g = super::super::backend::FORK_GEN.load(Ordering::Relaxed);
-            if self.pipe.is_some() && self.fork_gen != g {
-                // a fork() child: the pipe is shared with the parent
-                self.close_pipe();
+            if self.fork_gen == g {
+                return false;
             }
+            self.fork_gen = g;
+            if self.pipe.is_none() {
+                return false;
+            }
+            // (the child's copies of the parent's pipe only)
+            self.close_pipe();
+            let _ = self.ensure_pipe();
+            true
+        }
+
+        fn ensure_pipe(&mut self) -> Result<(), i32> {
+            self.check_fork();
             if self.pipe.is_some() {
                 return Ok(());
             }
@@ -176,7 +193,6 @@ mod imp {
             }
             self.slot = slot;
             self.pipe = Some((fds[0], fds[1]));
-            self.fork_gen = g;
             Ok(())
         }
 
@@ -224,6 +240,9 @@ mod imp {
         }
         pub fn take_delivered(&mut self, _woke: bool, out: &mut Vec<i32>) {
             out.clear();
+        }
+        pub fn check_fork(&mut self) -> bool {
+            false
         }
     }
 }

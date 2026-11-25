@@ -512,6 +512,10 @@ fn dispatch(d: D, blocking: bool) -> bool {
 
 fn dispatch_native(c: &mut Core, mut blocking: bool) {
     if !c.signals.by_signal.is_empty() {
+        // a fork() child's signal watchers get a wake pipe of their own before the poll
+        if c.signals.check_fork() {
+            c.reactor.set_wake(c.signals.wake_fd());
+        }
         let mut delivered = std::mem::take(&mut c.sig_buf);
         c.signals.take_delivered(false, &mut delivered);
         if !delivered.is_empty() {
