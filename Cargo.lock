@@ -939,14 +939,14 @@ dependencies = [
 
 [[package]]
 name = "revolt-ext"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "revolt-rs",
 ]
 
 [[package]]
 name = "revolt-rs"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "ext-php-rs",
  "libc",
