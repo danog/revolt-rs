@@ -63,6 +63,13 @@ cargo build --release -p revolt-ext
 (cd tests && composer install) && tools/test.sh
 ```
 
+Code style is rustfmt's defaults and clippy without warnings, both checked in CI:
+
+```bash
+cargo fmt --all
+cargo clippy --workspace --all-targets -- -D warnings
+```
+
 Other Rust extensions can run on the same loop: see [EMBEDDING.md](EMBEDDING.md).
 
 ## License

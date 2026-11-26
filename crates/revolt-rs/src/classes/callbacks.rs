@@ -488,7 +488,9 @@ impl Tq {
         while node != 0 {
             let parent = (node - 1) >> 1;
             let p = self.get(parent);
-            if p.is_null() || !(Self::exp(entry) < Self::exp(p)) {
+            if p.is_null()
+                || Self::exp(entry).partial_cmp(&Self::exp(p)) != Some(std::cmp::Ordering::Less)
+            {
                 break;
             }
             self.swap(node, parent);

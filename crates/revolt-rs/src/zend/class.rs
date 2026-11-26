@@ -224,7 +224,7 @@ pub unsafe fn register_class(
 ) -> *mut sys::zend_class_entry {
     let mut ce = class_entry(name, functions(methods));
     #[cfg(php84)]
-    return sys::zend_register_internal_class_with_flags(&mut ce, parent, flags as _);
+    return sys::zend_register_internal_class_with_flags(&raw mut ce, parent, flags as _);
     #[cfg(not(php84))]
     {
         let c = sys::zend_register_internal_class_ex(&mut ce, parent);
@@ -235,7 +235,7 @@ pub unsafe fn register_class(
 
 pub unsafe fn register_interface(name: &str, methods: Vec<Method>) -> *mut sys::zend_class_entry {
     let mut ce = class_entry(name, functions(methods));
-    sys::zend_register_internal_interface(&mut ce)
+    sys::zend_register_internal_interface(&raw mut ce)
 }
 
 /// A pure (not backed) enum with its cases.

@@ -232,7 +232,7 @@ mod imp {
 
     impl Drop for Watchers {
         fn drop(&mut self) {
-            for (&sig, _) in self.by_signal.iter() {
+            for &sig in self.by_signal.keys() {
                 uninstall(sig);
             }
             self.by_signal.clear();

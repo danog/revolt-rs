@@ -373,6 +373,10 @@ impl Records {
         self.map.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.map.is_empty()
+    }
+
     pub fn values(&self) -> impl Iterator<Item = &Record> {
         self.chunks
             .iter()
@@ -593,9 +597,8 @@ impl Core {
             }
             if !r.view.is_null() {
                 let mut z = unsafe { zval::obj_owned(r.view) };
+                // the buffer copies the zval: nothing to release here (`z` is a ManuallyDrop)
                 add(&mut *z);
-                // the buffer copies the zval: nothing to release here
-                std::mem::forget(z);
             }
         }
         for a in self.microtask_args.iter_mut() {
@@ -837,6 +840,8 @@ pub enum ViewProp {
     Expiration,
 }
 
+// (`view` is null or a record's view object, which lives as long as the record)
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub fn view_set_bool(view: *mut sys::zend_object, p: ViewProp, v: bool) {
     if !view.is_null() {
         unsafe { crate::classes::callbacks::view_write(view, p, zval::bool(v)) };

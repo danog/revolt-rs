@@ -724,7 +724,7 @@ fn dispatch_native(c: &mut Core, mut blocking: bool) {
         enqueue_signals(c, &delivered);
         c.sig_buf = delivered;
     }
-    if c.timers.len() > 0 {
+    if !c.timers.is_empty() {
         let now = clock::now();
         while let Some(cid) = c.timers.pop_expired(now) {
             c.enqueue(cid);
@@ -1019,10 +1019,7 @@ unsafe extern "C" fn callback_fiber_body(ex: call::Ex, _rv: *mut sys::zval) {
         if !invoke_microtasks(d) {
             return;
         }
-        loop {
-            let Some(cid) = d.c().callback_queue.pop_front() else {
-                break;
-            };
+        while let Some(cid) = d.c().callback_queue.pop_front() {
             if !invoke_callback(d, cid) {
                 return;
             }

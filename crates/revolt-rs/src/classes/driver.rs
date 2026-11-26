@@ -46,7 +46,7 @@ pub unsafe fn core<'a>(o: *mut sys::zend_object) -> &'a mut Core {
 /// Whether `o` is a driver object with the native core (alive).
 #[inline(always)]
 pub unsafe fn is_native(o: *mut sys::zend_object) -> bool {
-    (*o).handlers == HANDLERS as *const _ && !obj::freed(o)
+    std::ptr::eq((*o).handlers, HANDLERS) && !obj::freed(o)
 }
 
 /// Whether the native implementation of a Driver method applies to `o` (not overridden in PHP).
@@ -360,7 +360,6 @@ pub unsafe extern "C" fn defer(ex: Ex, rv: *mut sys::zval) {
 
 pub unsafe fn defer_d(ex: Ex, rv: *mut sys::zval, d: D) {
     let Some(o) = closure_only(ex) else { return };
-    let d = d;
     let id = run::defer(d, run::php_cb(o));
     ret_id(rv, d, id);
 }
@@ -432,7 +431,6 @@ pub unsafe fn on_signal_d(ex: Ex, rv: *mut sys::zval, d: D) {
     if !zpp!(ex, "lO", &mut sig, &mut z, sys::zend_ce_closure) {
         return;
     }
-    let d = d;
     if d.c().kind != DriverKind::User && !crate::core::signal::SUPPORTED {
         call::throw(
             ce().unsupported_feature,
@@ -450,7 +448,6 @@ pub unsafe extern "C" fn enable(ex: Ex, rv: *mut sys::zval) {
 
 pub unsafe fn enable_d(ex: Ex, rv: *mut sys::zval, d: D) {
     let Some(s) = id_arg(ex) else { return };
-    let d = d;
     match run::enable(d, parse_id(s)) {
         Some(true) => ret_str(rv, s),
         Some(false) => {

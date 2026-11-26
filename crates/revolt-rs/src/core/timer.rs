@@ -41,6 +41,10 @@ impl Heap {
         self.v.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.v.is_empty()
+    }
+
     /// Whether the record in `slot` is in the heap.
     #[inline]
     pub fn contains(&self, slot: u32) -> bool {

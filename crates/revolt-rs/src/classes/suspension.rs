@@ -53,8 +53,11 @@ impl Drop for SuspState {
                 c.main_suspension = null_mut();
             }
         } else {
-            c.suspensions
-                .remove(self.fiber, me as *mut std::ffi::c_void);
+            // (as before: an entry of a freed fiber is gone already, `remove` checks the entry first)
+            unsafe {
+                c.suspensions
+                    .remove(self.fiber, me as *mut std::ffi::c_void)
+            };
         }
     }
 }

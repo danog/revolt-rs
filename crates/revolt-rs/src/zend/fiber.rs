@@ -31,7 +31,10 @@ unsafe fn zf(o: *mut sys::zend_object) -> *mut sys::zend_fiber {
 
 #[inline(always)]
 pub unsafe fn status(o: *mut sys::zend_object) -> u32 {
-    (*zf(o)).context.status as u32
+    // (the enum's bindgen type is u32 on Unix, i32 with MSVC)
+    #[allow(clippy::unnecessary_cast)]
+    let s = (*zf(o)).context.status as u32;
+    s
 }
 
 /// Fiber::isTerminated()
@@ -294,7 +297,7 @@ pub mod inflight {
 
     /// Makes the values held for fiber `f` (a \Fiber, not null) visible to the cycle collector.
     pub unsafe fn track(f: *mut sys::zend_object) {
-        if (*f).handlers != HANDLERS as *const _ {
+        if !std::ptr::eq((*f).handlers, HANDLERS) {
             (*f).handlers = handlers(f);
         }
     }
@@ -335,7 +338,7 @@ pub mod inflight {
 
     /// The values of the last [`hold`] for `f` (null: {main}), owned by the caller again.
     #[inline]
-    pub fn take(f: *mut sys::zend_object) -> Taken {
+    pub unsafe fn take(f: *mut sys::zend_object) -> Taken {
         let mut out = Taken {
             len: 0,
             inline: [const { std::mem::MaybeUninit::uninit() }; INLINE],
@@ -362,7 +365,7 @@ pub mod inflight {
             } else {
                 out.heap = fr.vals.split_off(start);
             }
-            if fr.marks.is_empty() && !f.is_null() && (*f).handlers != HANDLERS as *const _ {
+            if fr.marks.is_empty() && !f.is_null() && !std::ptr::eq((*f).handlers, HANDLERS) {
                 // a fiber whose free_obj is not ours: its entry must not outlive it
                 drop(remove(f as usize));
             }

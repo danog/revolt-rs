@@ -240,6 +240,12 @@ fn kev(kq: i32, changes: &[Kev], events: &mut [Kev], timeout: Option<&libc::time
 /// A ready fd: (fd, readable, writable)
 pub type Ready = (i64, bool, bool);
 
+impl Default for Reactor {
+    fn default() -> Reactor {
+        Reactor::new()
+    }
+}
+
 impl Reactor {
     pub fn new() -> Reactor {
         Reactor {
