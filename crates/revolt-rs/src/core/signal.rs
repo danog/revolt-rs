@@ -153,11 +153,15 @@ mod imp {
         /// the pipe changed (the reactor must be given the new `wake_fd()`); if no pipe can be
         /// made, signals are still seen at every tick and end a wait with EINTR, but a wait
         /// can miss one that comes just before it.
+        #[inline(always)]
         pub fn check_fork(&mut self) -> bool {
             let g = super::super::backend::FORK_GEN.load(Ordering::Relaxed);
-            if self.fork_gen == g {
-                return false;
-            }
+            self.fork_gen != g && self.rebuild_after_fork(g)
+        }
+
+        #[cold]
+        #[inline(never)]
+        fn rebuild_after_fork(&mut self, g: u64) -> bool {
             self.fork_gen = g;
             if self.pipe.is_none() {
                 return false;

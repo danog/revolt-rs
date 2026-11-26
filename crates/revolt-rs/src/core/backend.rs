@@ -612,12 +612,21 @@ impl Reactor {
     /// removal (registered, no longer wanted) is a removal from the map only (nothing is
     /// registered in the child's poller), a pending addition or change registers anew. The wake
     /// pipe is the signal watchers' (`signal::Watchers::check_fork` replaces it).
+    /// The check is inlined into its callers (`poll` above all): one relaxed load and a branch;
+    /// the rebuild is out of line.
     #[cfg(unix)]
+    #[inline(always)]
     fn check_fork(&mut self) {
         let g = FORK_GEN.load(Ordering::Relaxed);
-        if g == self.fork_gen {
-            return;
+        if g != self.fork_gen {
+            self.rebuild_after_fork(g);
         }
+    }
+
+    #[cfg(unix)]
+    #[cold]
+    #[inline(never)]
+    fn rebuild_after_fork(&mut self, g: u64) {
         self.fork_gen = g;
         if self.poller >= 0 {
             // epoll: the instance is shared with the parent, never touch it again; kqueue: the
@@ -662,6 +671,7 @@ impl Reactor {
     }
 
     #[cfg(windows)]
+    #[inline(always)]
     fn check_fork(&mut self) {}
 
     /// Brings the poller's interest in line with the watchers.
