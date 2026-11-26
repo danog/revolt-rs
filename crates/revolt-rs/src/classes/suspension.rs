@@ -23,7 +23,14 @@ pub struct SuspState {
 
 impl obj::State for SuspState {
     fn new(_ce: *mut sys::zend_class_entry) -> Self {
-        SuspState { driver: Zv::undef(), fiber: null_mut(), suspended_fiber: Zv::undef(), error: Zv::null(), pending: false, dead_main: false }
+        SuspState {
+            driver: Zv::undef(),
+            fiber: null_mut(),
+            suspended_fiber: Zv::undef(),
+            error: Zv::null(),
+            pending: false,
+            dead_main: false,
+        }
     }
     fn gc(&mut self, add: &mut dyn FnMut(*mut sys::zval)) {
         add(&mut *self.driver.0);
@@ -46,7 +53,11 @@ impl Drop for SuspState {
                 c.main_suspension = null_mut();
             }
         } else {
-            c.suspensions.remove(self.fiber, me as *mut std::ffi::c_void);
+            // (as before: an entry of a freed fiber is gone already, `remove` checks the entry first)
+            unsafe {
+                c.suspensions
+                    .remove(self.fiber, me as *mut std::ffi::c_void)
+            };
         }
     }
 }
@@ -55,7 +66,10 @@ static mut HANDLERS: *mut sys::zend_object_handlers = null_mut();
 
 /// The object of a state (the state is right before it).
 fn self_obj(s: &mut SuspState) -> *mut sys::zend_object {
-    unsafe { (s as *mut SuspState as *mut u8).add(std::mem::offset_of!(obj::Native<SuspState>, std)) as *mut sys::zend_object }
+    unsafe {
+        (s as *mut SuspState as *mut u8).add(std::mem::offset_of!(obj::Native<SuspState>, std))
+            as *mut sys::zend_object
+    }
 }
 
 #[inline(always)]
@@ -72,11 +86,34 @@ pub unsafe fn register(ces: &mut Ces) {
     let cls = k::register_class(
         "Revolt\\EventLoop\\Internal\\DriverSuspension",
         vec![
-            m("__construct", zh!(construct), PUB, NONE, vec![a("run", T_CL), a("queue", T_CL), a("interrupt", T_CL), a("suspensions", c("WeakMap", false))]),
-            m("resume", zh!(resume), PUB, T_V, vec![ad("value", T_MIX, "null")]),
+            m(
+                "__construct",
+                zh!(construct),
+                PUB,
+                NONE,
+                vec![
+                    a("run", T_CL),
+                    a("queue", T_CL),
+                    a("interrupt", T_CL),
+                    a("suspensions", c("WeakMap", false)),
+                ],
+            ),
+            m(
+                "resume",
+                zh!(resume),
+                PUB,
+                T_V,
+                vec![ad("value", T_MIX, "null")],
+            ),
             m("suspend", zh!(suspend), PUB, T_MIX, vec![]),
             m("throw", zh!(throw), PUB, T_V, vec![a("throwable", T_THR)]),
-            m("formatStacktrace", zh!(format_stacktrace), PRI, T_S, vec![a("trace", T_A)]),
+            m(
+                "formatStacktrace",
+                zh!(format_stacktrace),
+                PRI,
+                T_S,
+                vec![a("trace", T_A)],
+            ),
         ],
         null_mut(),
         k::FINAL | k::NOT_SERIALIZABLE,
@@ -85,14 +122,38 @@ pub unsafe fn register(ces: &mut Ces) {
     (*cls).__bindgen_anon_2.create_object = Some(create_object);
     let pr = k::PRIVATE;
     k::prop(cls, "suspendedFiber", c("Fiber", true), pr, Dv::Null);
-    k::prop(cls, "fiberRef", c("WeakReference", true), pr | k::READONLY, Dv::Undef);
+    k::prop(
+        cls,
+        "fiberRef",
+        c("WeakReference", true),
+        pr | k::READONLY,
+        Dv::Undef,
+    );
     k::prop(cls, "error", c("Error", true), pr, Dv::Null);
-    k::prop(cls, "pending", crate::zend::class::t(k::T_BOOL), pr, Dv::Bool(false));
-    k::prop(cls, "deadMain", crate::zend::class::t(k::T_BOOL), pr, Dv::Bool(false));
+    k::prop(
+        cls,
+        "pending",
+        crate::zend::class::t(k::T_BOOL),
+        pr,
+        Dv::Bool(false),
+    );
+    k::prop(
+        cls,
+        "deadMain",
+        crate::zend::class::t(k::T_BOOL),
+        pr,
+        Dv::Bool(false),
+    );
     k::prop(cls, "run", T_CL, pr | k::READONLY, Dv::Undef);
     k::prop(cls, "queue", T_CL, pr | k::READONLY, Dv::Undef);
     k::prop(cls, "interrupt", T_CL, pr | k::READONLY, Dv::Undef);
-    k::prop(cls, "suspensions", c("WeakMap", false), pr | k::READONLY, Dv::Undef);
+    k::prop(
+        cls,
+        "suspensions",
+        c("WeakMap", false),
+        pr | k::READONLY,
+        Dv::Undef,
+    );
     ces.driver_suspension = cls;
 }
 
@@ -101,7 +162,11 @@ pub unsafe fn register(ces: &mut Ces) {
 pub unsafe fn get(d: D) -> *mut sys::zend_object {
     let f = zend::active_fiber();
     let c = d.c();
-    let found = if f.is_null() { c.main_suspension } else { c.suspensions.get(f) as *mut sys::zend_object };
+    let found = if f.is_null() {
+        c.main_suspension
+    } else {
+        c.suspensions.get(f) as *mut sys::zend_object
+    };
     if !found.is_null() {
         (*found).gc.refcount += 1;
         return found;
@@ -135,8 +200,24 @@ unsafe fn fiber_alive(o: *mut sys::zend_object, s: &SuspState, d: D) -> bool {
 }
 
 unsafe extern "C" fn construct(ex: Ex, _rv: *mut sys::zval) {
-    let (mut r, mut q, mut i, mut w): (*mut sys::zval, *mut sys::zval, *mut sys::zval, *mut sys::zval) = (null_mut(), null_mut(), null_mut(), null_mut());
-    if !zpp!(ex, "OOOO", &mut r, sys::zend_ce_closure, &mut q, sys::zend_ce_closure, &mut i, sys::zend_ce_closure, &mut w, super::class_lc(b"weakmap")) {
+    let (mut r, mut q, mut i, mut w): (
+        *mut sys::zval,
+        *mut sys::zval,
+        *mut sys::zval,
+        *mut sys::zval,
+    ) = (null_mut(), null_mut(), null_mut(), null_mut());
+    if !zpp!(
+        ex,
+        "OOOO",
+        &mut r,
+        sys::zend_ce_closure,
+        &mut q,
+        sys::zend_ce_closure,
+        &mut i,
+        sys::zend_ce_closure,
+        &mut w,
+        super::class_lc(b"weakmap")
+    ) {
         return;
     }
     call::throw_error("Revolt\\EventLoop\\Internal\\DriverSuspension objects are created by the event loop driver (getSuspension())");
@@ -144,7 +225,11 @@ unsafe extern "C" fn construct(ex: Ex, _rv: *mut sys::zval) {
 
 unsafe extern "C" fn resume(ex: Ex, _rv: *mut sys::zval) {
     // resume(mixed $value = null): any value, no parsing needed
-    let value = if call::num_args(ex) > 0 { Zv(zval::copy_deref(call::arg(ex, 0))) } else { Zv::null() };
+    let value = if call::num_args(ex) > 0 {
+        Zv(zval::copy_deref(call::arg(ex, 0)))
+    } else {
+        Zv::null()
+    };
     wake(call::this(ex), value, false);
 }
 
@@ -152,7 +237,9 @@ unsafe extern "C" fn throw(ex: Ex, _rv: *mut sys::zval) {
     let mut e: *mut sys::zval = null_mut();
     if call::num_args(ex) > 0 {
         let a = call::arg(ex, 0);
-        if zval::ty(a) == zval::OBJECT && call::instance_of((*(*a).value.obj).ce, sys::zend_ce_throwable) {
+        if zval::ty(a) == zval::OBJECT
+            && call::instance_of((*(*a).value.obj).ce, sys::zend_ce_throwable)
+        {
             e = a;
         }
     }
@@ -174,18 +261,30 @@ pub unsafe fn wake(o: *mut sys::zend_object, value: Zv, throw: bool) {
         if !zval::is_null(&s.error.0) {
             call::rethrow(zval::copy(&s.error.0).value.obj);
         } else {
-            call::throw_error(if throw { "Must call suspend() before calling throw()" } else { "Must call suspend() before calling resume()" });
+            call::throw_error(if throw {
+                "Must call suspend() before calling throw()"
+            } else {
+                "Must call suspend() before calling resume()"
+            });
         }
         return;
     }
     s.pending = false;
     if s.fiber.is_null() {
         // suspend the loop to {main}
-        d.c().interrupt = Some(if throw { Interrupt::Throw(value) } else { Interrupt::Value(value) });
+        d.c().interrupt = Some(if throw {
+            Interrupt::Throw(value)
+        } else {
+            Interrupt::Value(value)
+        });
         return;
     }
     if fiber_alive(o, s, d) {
-        d.c().microtasks.push_back(Microtask::Resume { fiber: Zv(zval::obj_ref(s.fiber)), value, throw });
+        d.c().microtasks.push_back(Microtask::Resume {
+            fiber: Zv(zval::obj_ref(s.fiber)),
+            value,
+            throw,
+        });
     }
     // a fiber that died while suspended (destroyed by the GC) is not resumed
 }
@@ -201,9 +300,15 @@ pub unsafe fn suspend_value(o: *mut sys::zend_object) -> Zv {
         call::throw_error("Must call resume() or throw() before calling suspend() again");
         return Zv::undef();
     }
-    let Some(d) = driver_of(s) else { return Zv::undef() };
+    let Some(d) = driver_of(s) else {
+        return Zv::undef();
+    };
     let cur = zend::active_fiber();
-    let mine = if s.fiber.is_null() || fiber_alive(o, s, d) { s.fiber } else { null_mut() };
+    let mine = if s.fiber.is_null() || fiber_alive(o, s, d) {
+        s.fiber
+    } else {
+        null_mut()
+    };
     if mine != cur || (!s.fiber.is_null() && mine.is_null()) {
         call::throw_error("Must not call suspend() from another fiber");
         return Zv::undef();

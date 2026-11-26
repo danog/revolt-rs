@@ -10,5 +10,8 @@ description = "A test PHP extension embedding revolt-rs (two copies loaded, nati
 name = "revolt_embed_example"
 crate-type = ["cdylib"]
 
+[lints]
+workspace = true
+
 [dependencies]
 revolt-rs = { path = "../../crates/revolt-rs" }

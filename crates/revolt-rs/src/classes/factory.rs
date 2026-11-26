@@ -12,7 +12,13 @@ pub unsafe fn register(ces: &mut Ces) {
         "Revolt\\EventLoop\\DriverFactory",
         vec![
             m("create", zh!(create_handler), PUB, T_DRV, vec![]),
-            m("createDriverFromEnv", zh!(from_env_handler), PRI, c("Revolt\\EventLoop\\Driver", true), vec![]),
+            m(
+                "createDriverFromEnv",
+                zh!(from_env_handler),
+                PRI,
+                c("Revolt\\EventLoop\\Driver", true),
+                vec![],
+            ),
         ],
         null_mut(),
         k::FINAL,

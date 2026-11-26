@@ -7,6 +7,9 @@ license = "MIT"
 repository = "https://github.com/danog/revolt-rs"
 description = "revolt/event-loop implemented natively in Rust, embeddable in any Rust PHP extension"
 
+[lints]
+workspace = true
+
 [dependencies]
 # module plumbing and the Zend Engine bindings; only its wrapper.c is compiled (no C libraries).
 # `observer` makes its bindings include zend_observer.h, hence zend_fibers.h.

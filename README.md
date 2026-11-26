@@ -9,6 +9,9 @@ in Rust. Install it, and everything built on Revolt (Amp v3, your own code) runs
 - **No extra extensions:** no `stream_select()` limits, and no ext-ev, ext-event, ext-uv or
   ext-pcntl needed for fast I/O, timers and signals.
 - PHP 8.2–8.6, NTS and ZTS, on Linux, macOS and Windows.
+- **fork():** `pcntl_fork()` works, also from inside a running loop (amphp/parallel's
+  `ForkContext`, Psalm's worker pool): the child keeps a copy of every callback and goes on with
+  its own poller, wait timer and signal wake pipe; nothing it does touches the parent's loop.
 
 ## Install
 
@@ -58,6 +61,13 @@ overhead. `php tools/bench/bench.php default all` has a case for every hot path.
 ```bash
 cargo build --release -p revolt-ext
 (cd tests && composer install) && tools/test.sh
+```
+
+Code style is rustfmt's defaults and clippy without warnings, both checked in CI:
+
+```bash
+cargo fmt --all
+cargo clippy --workspace --all-targets -- -D warnings
 ```
 
 Other Rust extensions can run on the same loop: see [EMBEDDING.md](EMBEDDING.md).

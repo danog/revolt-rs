@@ -15,6 +15,12 @@ fn key(o: *mut sys::zend_object) -> u64 {
     (o as usize as u64) >> 3
 }
 
+impl Default for WeakTable {
+    fn default() -> WeakTable {
+        WeakTable::new()
+    }
+}
+
 impl WeakTable {
     pub fn new() -> WeakTable {
         WeakTable { ht: null_mut() }
@@ -32,7 +38,7 @@ impl WeakTable {
         }
     }
 
-    pub fn add(&mut self, o: *mut sys::zend_object, p: *mut c_void) {
+    pub unsafe fn add(&mut self, o: *mut sys::zend_object, p: *mut c_void) {
         unsafe {
             if self.ht.is_null() {
                 self.ht = hash::new(8);
@@ -44,7 +50,7 @@ impl WeakTable {
 
     /// Removes `o`'s entry if it is there with value `p` (an entry of a freed object is gone
     /// already; another object at the same address has another value).
-    pub fn remove(&mut self, o: *mut sys::zend_object, p: *mut c_void) {
+    pub unsafe fn remove(&mut self, o: *mut sys::zend_object, p: *mut c_void) {
         if !self.ht.is_null() && self.get(o) == p {
             unsafe { sys::zend_weakrefs_hash_del(self.ht, o) };
         }
@@ -69,6 +75,10 @@ impl WeakTable {
             hash::release(self.ht);
         }
         self.ht = null_mut();
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 
     pub fn len(&self) -> u32 {

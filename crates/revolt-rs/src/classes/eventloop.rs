@@ -69,27 +69,147 @@ pub unsafe fn rshutdown() {
 
 pub unsafe fn register(ces: &mut Ces) {
     let ms = vec![
-        m("setDriver", zh!(set_driver_h), PUB | STA, T_V, vec![a("driver", T_DRV)]),
-        m("queue", zh!(queue), PUB | STA, T_V, vec![a("closure", T_CL), av("args", T_MIX)]),
-        m("defer", zh!(defer), PUB | STA, T_S, vec![a("closure", T_CL)]),
-        m("delay", zh!(delay), PUB | STA, T_S, vec![a("delay", T_F), a("closure", T_CL)]),
-        m("repeat", zh!(repeat), PUB | STA, T_S, vec![a("interval", T_F), a("closure", T_CL)]),
-        m("onReadable", zh!(on_readable), PUB | STA, T_S, vec![a("stream", T_MIX), a("closure", T_CL)]),
-        m("onWritable", zh!(on_writable), PUB | STA, T_S, vec![a("stream", T_MIX), a("closure", T_CL)]),
-        m("onSignal", zh!(on_signal), PUB | STA, T_S, vec![a("signal", T_I), a("closure", T_CL)]),
-        m("enable", zh!(enable), PUB | STA, T_S, vec![a("callbackId", T_S)]),
-        m("disable", zh!(disable), PUB | STA, T_S, vec![a("callbackId", T_S)]),
-        m("cancel", zh!(cancel), PUB | STA, T_V, vec![a("callbackId", T_S)]),
-        m("reference", zh!(reference), PUB | STA, T_S, vec![a("callbackId", T_S)]),
-        m("unreference", zh!(unreference), PUB | STA, T_S, vec![a("callbackId", T_S)]),
-        m("setErrorHandler", zh!(set_error_handler), PUB | STA, T_V, vec![a("errorHandler", T_CLN)]),
-        m("getErrorHandler", zh!(get_error_handler), PUB | STA, T_CLN, vec![]),
-        m("getIdentifiers", zh!(get_identifiers), PUB | STA, T_A, vec![]),
-        m("getType", zh!(get_type), PUB | STA, T_CBT, vec![a("callbackId", T_S)]),
-        m("isEnabled", zh!(is_enabled), PUB | STA, T_B, vec![a("callbackId", T_S)]),
-        m("isReferenced", zh!(is_referenced), PUB | STA, T_B, vec![a("callbackId", T_S)]),
+        m(
+            "setDriver",
+            zh!(set_driver_h),
+            PUB | STA,
+            T_V,
+            vec![a("driver", T_DRV)],
+        ),
+        m(
+            "queue",
+            zh!(queue),
+            PUB | STA,
+            T_V,
+            vec![a("closure", T_CL), av("args", T_MIX)],
+        ),
+        m(
+            "defer",
+            zh!(defer),
+            PUB | STA,
+            T_S,
+            vec![a("closure", T_CL)],
+        ),
+        m(
+            "delay",
+            zh!(delay),
+            PUB | STA,
+            T_S,
+            vec![a("delay", T_F), a("closure", T_CL)],
+        ),
+        m(
+            "repeat",
+            zh!(repeat),
+            PUB | STA,
+            T_S,
+            vec![a("interval", T_F), a("closure", T_CL)],
+        ),
+        m(
+            "onReadable",
+            zh!(on_readable),
+            PUB | STA,
+            T_S,
+            vec![a("stream", T_MIX), a("closure", T_CL)],
+        ),
+        m(
+            "onWritable",
+            zh!(on_writable),
+            PUB | STA,
+            T_S,
+            vec![a("stream", T_MIX), a("closure", T_CL)],
+        ),
+        m(
+            "onSignal",
+            zh!(on_signal),
+            PUB | STA,
+            T_S,
+            vec![a("signal", T_I), a("closure", T_CL)],
+        ),
+        m(
+            "enable",
+            zh!(enable),
+            PUB | STA,
+            T_S,
+            vec![a("callbackId", T_S)],
+        ),
+        m(
+            "disable",
+            zh!(disable),
+            PUB | STA,
+            T_S,
+            vec![a("callbackId", T_S)],
+        ),
+        m(
+            "cancel",
+            zh!(cancel),
+            PUB | STA,
+            T_V,
+            vec![a("callbackId", T_S)],
+        ),
+        m(
+            "reference",
+            zh!(reference),
+            PUB | STA,
+            T_S,
+            vec![a("callbackId", T_S)],
+        ),
+        m(
+            "unreference",
+            zh!(unreference),
+            PUB | STA,
+            T_S,
+            vec![a("callbackId", T_S)],
+        ),
+        m(
+            "setErrorHandler",
+            zh!(set_error_handler),
+            PUB | STA,
+            T_V,
+            vec![a("errorHandler", T_CLN)],
+        ),
+        m(
+            "getErrorHandler",
+            zh!(get_error_handler),
+            PUB | STA,
+            T_CLN,
+            vec![],
+        ),
+        m(
+            "getIdentifiers",
+            zh!(get_identifiers),
+            PUB | STA,
+            T_A,
+            vec![],
+        ),
+        m(
+            "getType",
+            zh!(get_type),
+            PUB | STA,
+            T_CBT,
+            vec![a("callbackId", T_S)],
+        ),
+        m(
+            "isEnabled",
+            zh!(is_enabled),
+            PUB | STA,
+            T_B,
+            vec![a("callbackId", T_S)],
+        ),
+        m(
+            "isReferenced",
+            zh!(is_referenced),
+            PUB | STA,
+            T_B,
+            vec![a("callbackId", T_S)],
+        ),
         m("getDriver", zh!(get_driver), PUB | STA, T_DRV, vec![]),
-        m("getSuspension", zh!(get_suspension), PUB | STA, T_SUSP, vec![]),
+        m(
+            "getSuspension",
+            zh!(get_suspension),
+            PUB | STA,
+            T_SUSP,
+            vec![],
+        ),
         m("run", zh!(run), PUB | STA, T_V, vec![]),
         m("__construct", zh!(dr::private_noop), PRI, NONE, vec![]),
     ];
@@ -146,7 +266,15 @@ unsafe fn forward(ex: Ex, rv: *mut sys::zval, drv: *mut sys::zend_object, lc: &[
         call::method(drv, lc, &mut args)
     } else {
         (*drv).gc.refcount += 1;
-        let r = call::call(&call::Callee { func: f, obj: drv, scope: (*drv).ce }, &mut args, call::extra_named(ex));
+        let r = call::call(
+            &call::Callee {
+                func: f,
+                obj: drv,
+                scope: (*drv).ce,
+            },
+            &mut args,
+            call::extra_named(ex),
+        );
         let mut z = zval::obj_owned(drv);
         zval::dtor(&mut z);
         r
@@ -180,21 +308,56 @@ facade!(queue, "queue", dr::queue_d, Shape::ClosureVariadic);
 facade!(defer, "defer", dr::defer_d, Shape::Closure);
 facade!(delay, "delay", dr::delay_d, Shape::FloatClosure);
 facade!(repeat, "repeat", dr::repeat_d, Shape::FloatClosure);
-facade!(on_readable, "onreadable", dr::on_readable_d, Shape::MixedClosure);
-facade!(on_writable, "onwritable", dr::on_writable_d, Shape::MixedClosure);
+facade!(
+    on_readable,
+    "onreadable",
+    dr::on_readable_d,
+    Shape::MixedClosure
+);
+facade!(
+    on_writable,
+    "onwritable",
+    dr::on_writable_d,
+    Shape::MixedClosure
+);
 facade!(on_signal, "onsignal", dr::on_signal_d, Shape::IntClosure);
 facade!(enable, "enable", dr::enable_d, Shape::Id);
 facade!(disable, "disable", dr::disable_d, Shape::Id);
 facade!(cancel, "cancel", dr::cancel_d, Shape::Id);
 facade!(reference, "reference", dr::reference_d, Shape::Id);
 facade!(unreference, "unreference", dr::unreference_d, Shape::Id);
-facade!(set_error_handler, "seterrorhandler", dr::set_error_handler_d, Shape::NullableClosure);
-facade!(get_error_handler, "geterrorhandler", dr::get_error_handler_d, Shape::None);
-facade!(get_identifiers, "getidentifiers", dr::get_identifiers_d, Shape::None);
+facade!(
+    set_error_handler,
+    "seterrorhandler",
+    dr::set_error_handler_d,
+    Shape::NullableClosure
+);
+facade!(
+    get_error_handler,
+    "geterrorhandler",
+    dr::get_error_handler_d,
+    Shape::None
+);
+facade!(
+    get_identifiers,
+    "getidentifiers",
+    dr::get_identifiers_d,
+    Shape::None
+);
 facade!(get_type, "gettype", dr::get_type_d, Shape::Id);
 facade!(is_enabled, "isenabled", dr::is_enabled_d, Shape::Id);
-facade!(is_referenced, "isreferenced", dr::is_referenced_d, Shape::Id);
-facade!(get_suspension, "getsuspension", dr::get_suspension_d, Shape::None);
+facade!(
+    is_referenced,
+    "isreferenced",
+    dr::is_referenced_d,
+    Shape::Id
+);
+facade!(
+    get_suspension,
+    "getsuspension",
+    dr::get_suspension_d,
+    Shape::None
+);
 facade!(run, "run", dr::run_d, Shape::None);
 
 unsafe extern "C" fn get_driver(ex: Ex, rv: *mut sys::zval) {

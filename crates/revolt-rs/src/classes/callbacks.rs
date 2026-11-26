@@ -26,7 +26,20 @@ struct Slots {
     tq_pointers: usize,
 }
 
-static mut SLOTS: Slots = Slots { invokable: 0, enabled: 0, referenced: 0, id: 0, closure: 0, interval: 0, expiration: 0, repeat: 0, stream: 0, signal: 0, tq_callbacks: 0, tq_pointers: 0 };
+static mut SLOTS: Slots = Slots {
+    invokable: 0,
+    enabled: 0,
+    referenced: 0,
+    id: 0,
+    closure: 0,
+    interval: 0,
+    expiration: 0,
+    repeat: 0,
+    stream: 0,
+    signal: 0,
+    tq_callbacks: 0,
+    tq_pointers: 0,
+};
 
 fn slots() -> &'static Slots {
     unsafe { &*std::ptr::addr_of!(SLOTS) }
@@ -37,9 +50,27 @@ pub unsafe fn register(ces: &mut Ces) {
     let dc = k::register_class(
         "Revolt\\EventLoop\\Internal\\DriverCallback",
         vec![
-            m("__construct", zh!(dc_construct), PUB, NONE, vec![a("id", T_S), a("closure", T_CL)]),
-            m("__get", zh!(magic_get), PUB, T_NEVER, vec![a("property", T_S)]),
-            m("__set", zh!(magic_set), PUB, T_NEVER, vec![a("property", T_S), a("value", T_MIX)]),
+            m(
+                "__construct",
+                zh!(dc_construct),
+                PUB,
+                NONE,
+                vec![a("id", T_S), a("closure", T_CL)],
+            ),
+            m(
+                "__get",
+                zh!(magic_get),
+                PUB,
+                T_NEVER,
+                vec![a("property", T_S)],
+            ),
+            m(
+                "__set",
+                zh!(magic_set),
+                PUB,
+                T_NEVER,
+                vec![a("property", T_S), a("value", T_MIX)],
+            ),
         ],
         null_mut(),
         k::ABSTRACT,
@@ -50,10 +81,27 @@ pub unsafe fn register(ces: &mut Ces) {
     k::prop(dc, "id", T_S, ro, Dv::Undef);
     k::prop(dc, "closure", T_CL, ro, Dv::Undef);
     ces.driver_callback = dc;
-    ces.defer_callback = k::register_class("Revolt\\EventLoop\\Internal\\DeferCallback", vec![], dc, k::FINAL);
+    ces.defer_callback = k::register_class(
+        "Revolt\\EventLoop\\Internal\\DeferCallback",
+        vec![],
+        dc,
+        k::FINAL,
+    );
     ces.timer_callback = k::register_class(
         "Revolt\\EventLoop\\Internal\\TimerCallback",
-        vec![m("__construct", zh!(timer_construct), PUB, NONE, vec![a("id", T_S), a("interval", T_F), a("callback", T_CL), a("expiration", T_F), ad("repeat", T_B, "false")])],
+        vec![m(
+            "__construct",
+            zh!(timer_construct),
+            PUB,
+            NONE,
+            vec![
+                a("id", T_S),
+                a("interval", T_F),
+                a("callback", T_CL),
+                a("expiration", T_F),
+                ad("repeat", T_B, "false"),
+            ],
+        )],
         dc,
         k::FINAL,
     );
@@ -62,16 +110,38 @@ pub unsafe fn register(ces: &mut Ces) {
     k::prop(ces.timer_callback, "repeat", T_B, ro, Dv::Undef);
     ces.stream_callback = k::register_class(
         "Revolt\\EventLoop\\Internal\\StreamCallback",
-        vec![m("__construct", zh!(stream_construct), PUB, NONE, vec![a("id", T_S), a("closure", T_CL), a("stream", T_MIX)])],
+        vec![m(
+            "__construct",
+            zh!(stream_construct),
+            PUB,
+            NONE,
+            vec![a("id", T_S), a("closure", T_CL), a("stream", T_MIX)],
+        )],
         dc,
         k::ABSTRACT,
     );
     k::prop(ces.stream_callback, "stream", T_MIX, ro, Dv::Undef);
-    ces.readable_callback = k::register_class("Revolt\\EventLoop\\Internal\\StreamReadableCallback", vec![], ces.stream_callback, k::FINAL);
-    ces.writable_callback = k::register_class("Revolt\\EventLoop\\Internal\\StreamWritableCallback", vec![], ces.stream_callback, k::FINAL);
+    ces.readable_callback = k::register_class(
+        "Revolt\\EventLoop\\Internal\\StreamReadableCallback",
+        vec![],
+        ces.stream_callback,
+        k::FINAL,
+    );
+    ces.writable_callback = k::register_class(
+        "Revolt\\EventLoop\\Internal\\StreamWritableCallback",
+        vec![],
+        ces.stream_callback,
+        k::FINAL,
+    );
     ces.signal_callback = k::register_class(
         "Revolt\\EventLoop\\Internal\\SignalCallback",
-        vec![m("__construct", zh!(signal_construct), PUB, NONE, vec![a("id", T_S), a("closure", T_CL), a("signal", T_I)])],
+        vec![m(
+            "__construct",
+            zh!(signal_construct),
+            PUB,
+            NONE,
+            vec![a("id", T_S), a("closure", T_CL), a("signal", T_I)],
+        )],
         dc,
         k::FINAL,
     );
@@ -83,17 +153,59 @@ pub unsafe fn register(ces: &mut Ces) {
         vec![
             m("insert", zh!(tq_insert), PUB, T_V, vec![a("callback", tc)]),
             m("remove", zh!(tq_remove), PUB, T_V, vec![a("callback", tc)]),
-            m("extract", zh!(tq_extract), PUB, c("Revolt\\EventLoop\\Internal\\TimerCallback", true), vec![a("now", T_F)]),
-            m("peek", zh!(tq_peek), PUB, crate::zend::class::t(k::T_FLOAT | k::T_NULL), vec![]),
-            m("heapifyUp", zh!(tq_heapify_up), PRI, T_V, vec![a("node", T_I)]),
-            m("heapifyDown", zh!(tq_heapify_down), PRI, T_V, vec![a("node", T_I)]),
-            m("swap", zh!(tq_swap), PRI, T_V, vec![a("left", T_I), a("right", T_I)]),
-            m("removeAndRebuild", zh!(tq_remove_and_rebuild), PRI, T_V, vec![a("node", T_I)]),
+            m(
+                "extract",
+                zh!(tq_extract),
+                PUB,
+                c("Revolt\\EventLoop\\Internal\\TimerCallback", true),
+                vec![a("now", T_F)],
+            ),
+            m(
+                "peek",
+                zh!(tq_peek),
+                PUB,
+                crate::zend::class::t(k::T_FLOAT | k::T_NULL),
+                vec![],
+            ),
+            m(
+                "heapifyUp",
+                zh!(tq_heapify_up),
+                PRI,
+                T_V,
+                vec![a("node", T_I)],
+            ),
+            m(
+                "heapifyDown",
+                zh!(tq_heapify_down),
+                PRI,
+                T_V,
+                vec![a("node", T_I)],
+            ),
+            m(
+                "swap",
+                zh!(tq_swap),
+                PRI,
+                T_V,
+                vec![a("left", T_I), a("right", T_I)],
+            ),
+            m(
+                "removeAndRebuild",
+                zh!(tq_remove_and_rebuild),
+                PRI,
+                T_V,
+                vec![a("node", T_I)],
+            ),
         ],
         null_mut(),
         k::FINAL,
     );
-    k::prop(ces.timer_queue, "callbacks", T_A, k::PRIVATE, Dv::EmptyArray);
+    k::prop(
+        ces.timer_queue,
+        "callbacks",
+        T_A,
+        k::PRIVATE,
+        Dv::EmptyArray,
+    );
     k::prop(ces.timer_queue, "pointers", T_A, k::PRIVATE, Dv::EmptyArray);
 
     let s = &mut *std::ptr::addr_of_mut!(SLOTS);
@@ -117,7 +229,10 @@ unsafe fn init_ro(o: *mut sys::zend_object, slot: usize, name: &str, v: zval::Z)
     if !zval::is_undef(obj::prop(o, slot)) {
         let mut v = v;
         zval::dtor(&mut v);
-        call::throw_error(&format!("Cannot modify readonly property {}::${name}", String::from_utf8_lossy(call::class_name((*o).ce))));
+        call::throw_error(&format!(
+            "Cannot modify readonly property {}::${name}",
+            String::from_utf8_lossy(call::class_name((*o).ce))
+        ));
         return false;
     }
     obj::set_prop(o, slot, v);
@@ -132,7 +247,8 @@ unsafe extern "C" fn dc_construct(ex: Ex, _rv: *mut sys::zval) {
     }
     let o = call::this(ex);
     let s = slots();
-    let _ = init_ro(o, s.id, "id", zval::str_ref(id)) && init_ro(o, s.closure, "closure", zval::copy(cl));
+    let _ = init_ro(o, s.id, "id", zval::str_ref(id))
+        && init_ro(o, s.closure, "closure", zval::copy(cl));
 }
 
 unsafe extern "C" fn timer_construct(ex: Ex, _rv: *mut sys::zval) {
@@ -141,7 +257,16 @@ unsafe extern "C" fn timer_construct(ex: Ex, _rv: *mut sys::zval) {
     let mut cl: *mut sys::zval = null_mut();
     let mut exp = 0f64;
     let mut repeat = false;
-    if !zpp!(ex, "SdOd|b", &mut id, &mut interval, &mut cl, sys::zend_ce_closure, &mut exp, &mut repeat) {
+    if !zpp!(
+        ex,
+        "SdOd|b",
+        &mut id,
+        &mut interval,
+        &mut cl,
+        sys::zend_ce_closure,
+        &mut exp,
+        &mut repeat
+    ) {
         return;
     }
     let o = call::this(ex);
@@ -151,7 +276,9 @@ unsafe extern "C" fn timer_construct(ex: Ex, _rv: *mut sys::zval) {
         return;
     }
     obj::set_prop(o, s.expiration, zval::double(exp));
-    let _ = init_ro(o, s.repeat, "repeat", zval::bool(repeat)) && init_ro(o, s.id, "id", zval::str_ref(id)) && init_ro(o, s.closure, "closure", zval::copy(cl));
+    let _ = init_ro(o, s.repeat, "repeat", zval::bool(repeat))
+        && init_ro(o, s.id, "id", zval::str_ref(id))
+        && init_ro(o, s.closure, "closure", zval::copy(cl));
 }
 
 unsafe extern "C" fn stream_construct(ex: Ex, _rv: *mut sys::zval) {
@@ -163,7 +290,9 @@ unsafe extern "C" fn stream_construct(ex: Ex, _rv: *mut sys::zval) {
     }
     let o = call::this(ex);
     let s = slots();
-    let _ = init_ro(o, s.stream, "stream", zval::copy_deref(st)) && init_ro(o, s.id, "id", zval::str_ref(id)) && init_ro(o, s.closure, "closure", zval::copy(cl));
+    let _ = init_ro(o, s.stream, "stream", zval::copy_deref(st))
+        && init_ro(o, s.id, "id", zval::str_ref(id))
+        && init_ro(o, s.closure, "closure", zval::copy(cl));
 }
 
 unsafe extern "C" fn signal_construct(ex: Ex, _rv: *mut sys::zval) {
@@ -175,7 +304,9 @@ unsafe extern "C" fn signal_construct(ex: Ex, _rv: *mut sys::zval) {
     }
     let o = call::this(ex);
     let s = slots();
-    let _ = init_ro(o, s.signal, "signal", zval::long(sig)) && init_ro(o, s.id, "id", zval::str_ref(id)) && init_ro(o, s.closure, "closure", zval::copy(cl));
+    let _ = init_ro(o, s.signal, "signal", zval::long(sig))
+        && init_ro(o, s.id, "id", zval::str_ref(id))
+        && init_ro(o, s.closure, "closure", zval::copy(cl));
 }
 
 unsafe extern "C" fn magic_get(ex: Ex, _rv: *mut sys::zval) {
@@ -199,7 +330,9 @@ unsafe extern "C" fn magic_set(ex: Ex, _rv: *mut sys::zval) {
 
 /// The DriverCallback object of a record (created on first use, kept by the record).
 pub unsafe fn view(d: D, id: u64) -> *mut sys::zend_object {
-    let Some(r) = d.c().record(id) else { return null_mut() };
+    let Some(r) = d.c().record(id) else {
+        return null_mut();
+    };
     if !r.view.is_null() {
         return r.view;
     }
@@ -225,7 +358,10 @@ pub unsafe fn view(d: D, id: u64) -> *mut sys::zend_object {
         obj::set_prop(o, s.closure, zval::copy(&closure.0));
     }
     match &r.watch {
-        &Watch::Timer { interval, expiration } => {
+        &Watch::Timer {
+            interval,
+            expiration,
+        } => {
             obj::set_prop(o, s.interval, zval::double(interval));
             obj::set_prop(o, s.expiration, zval::double(expiration));
             obj::set_prop(o, s.repeat, zval::bool(r.kind == Kind::Repeat));
@@ -352,7 +488,9 @@ impl Tq {
         while node != 0 {
             let parent = (node - 1) >> 1;
             let p = self.get(parent);
-            if p.is_null() || !(Self::exp(entry) < Self::exp(p)) {
+            if p.is_null()
+                || Self::exp(entry).partial_cmp(&Self::exp(p)) != Some(std::cmp::Ordering::Less)
+            {
                 break;
             }
             self.swap(node, parent);
@@ -368,8 +506,14 @@ impl Tq {
                 break;
             }
             let (cn, cc) = (self.get(node), self.get(child));
-            let cr = if child + 1 < length { self.get(child + 1) } else { null_mut() };
-            let swap = if Self::exp(cc) < Self::exp(cn) && (child + 1 >= length || Self::exp(cc) < Self::exp(cr)) {
+            let cr = if child + 1 < length {
+                self.get(child + 1)
+            } else {
+                null_mut()
+            };
+            let swap = if Self::exp(cc) < Self::exp(cn)
+                && (child + 1 >= length || Self::exp(cc) < Self::exp(cr))
+            {
                 child
             } else if child + 1 < length && Self::exp(cr) < Self::exp(cn) {
                 child + 1
@@ -479,7 +623,14 @@ unsafe extern "C" fn tq_peek(ex: Ex, rv: *mut sys::zval) {
         return;
     }
     let cb = Tq(call::this(ex)).get(0);
-    zval::write(rv, if cb.is_null() { zval::null() } else { zval::double(Tq::exp(cb)) });
+    zval::write(
+        rv,
+        if cb.is_null() {
+            zval::null()
+        } else {
+            zval::double(Tq::exp(cb))
+        },
+    );
 }
 
 unsafe extern "C" fn tq_heapify_up(ex: Ex, _rv: *mut sys::zval) {

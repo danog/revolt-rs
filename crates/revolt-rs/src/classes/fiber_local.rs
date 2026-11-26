@@ -26,8 +26,20 @@ pub unsafe fn register(ces: &mut Ces) {
         "Revolt\\EventLoop\\FiberLocal",
         vec![
             m("clear", zh!(clear_handler), PUB | STA, T_V, vec![]),
-            m("getFiberStorage", zh!(get_fiber_storage), PRI | STA, c("WeakMap", false), vec![]),
-            m("__construct", zh!(construct), PUB, NONE, vec![a("initializer", T_CL)]),
+            m(
+                "getFiberStorage",
+                zh!(get_fiber_storage),
+                PRI | STA,
+                c("WeakMap", false),
+                vec![],
+            ),
+            m(
+                "__construct",
+                zh!(construct),
+                PUB,
+                NONE,
+                vec![a("initializer", T_CL)],
+            ),
             m("set", zh!(set), PUB, T_V, vec![a("value", T_MIX)]),
             m("unset", zh!(unset), PUB, T_V, vec![]),
             m("get", zh!(get), PUB, T_MIX, vec![]),
@@ -35,9 +47,27 @@ pub unsafe fn register(ces: &mut Ces) {
         null_mut(),
         k::FINAL,
     );
-    k::prop(cls, "mainFiber", c("Fiber", true), k::PRIVATE | k::STATIC, Dv::Null);
-    k::prop(cls, "localStorage", c("WeakMap", true), k::PRIVATE | k::STATIC, Dv::Null);
-    k::prop(cls, "initializer", T_CL, k::PRIVATE | k::READONLY, Dv::Undef);
+    k::prop(
+        cls,
+        "mainFiber",
+        c("Fiber", true),
+        k::PRIVATE | k::STATIC,
+        Dv::Null,
+    );
+    k::prop(
+        cls,
+        "localStorage",
+        c("WeakMap", true),
+        k::PRIVATE | k::STATIC,
+        Dv::Null,
+    );
+    k::prop(
+        cls,
+        "initializer",
+        T_CL,
+        k::PRIVATE | k::READONLY,
+        Dv::Undef,
+    );
     INITIALIZER = k::prop_slot(cls, "initializer");
     WEAKMAP = call::lookup_class(b"weakmap");
     NOOP_FN = fiber::internal_function("{closure}", zh!(noop), cls);
@@ -169,7 +199,9 @@ unsafe extern "C" fn construct(ex: Ex, _rv: *mut sys::zval) {
     }
     let o = call::this(ex);
     if !zval::is_undef(obj::prop(o, INITIALIZER)) {
-        call::throw_error("Cannot modify readonly property Revolt\\EventLoop\\FiberLocal::$initializer");
+        call::throw_error(
+            "Cannot modify readonly property Revolt\\EventLoop\\FiberLocal::$initializer",
+        );
         return;
     }
     obj::set_prop(o, INITIALIZER, zval::copy(cl));

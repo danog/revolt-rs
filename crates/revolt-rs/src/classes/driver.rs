@@ -21,7 +21,9 @@ pub struct DriverState {
 
 impl obj::State for DriverState {
     fn new(ce: *mut sys::zend_class_entry) -> Self {
-        DriverState { core: Some(Box::new(Core::new(kind_of(ce)))) }
+        DriverState {
+            core: Some(Box::new(Core::new(kind_of(ce)))),
+        }
     }
     fn gc(&mut self, add: &mut dyn FnMut(*mut sys::zval)) {
         if let Some(c) = &mut self.core {
@@ -35,13 +37,16 @@ static mut HANDLERS: *mut sys::zend_object_handlers = null_mut();
 /// The Core of a driver object.
 #[inline(always)]
 pub unsafe fn core<'a>(o: *mut sys::zend_object) -> &'a mut Core {
-    obj::state::<DriverState>(o).core.as_mut().unwrap_unchecked()
+    obj::state::<DriverState>(o)
+        .core
+        .as_mut()
+        .unwrap_unchecked()
 }
 
 /// Whether `o` is a driver object with the native core (alive).
 #[inline(always)]
 pub unsafe fn is_native(o: *mut sys::zend_object) -> bool {
-    (*o).handlers == HANDLERS as *const _ && !obj::freed(o)
+    std::ptr::eq((*o).handlers, HANDLERS) && !obj::freed(o)
 }
 
 /// Whether the native implementation of a Driver method applies to `o` (not overridden in PHP).
@@ -112,7 +117,10 @@ const fn eq(a: &[u8], b: &[u8]) -> bool {
     true
 }
 
-unsafe fn user_method(ce: *mut sys::zend_class_entry, lc: &[u8]) -> Option<*mut sys::zend_function> {
+unsafe fn user_method(
+    ce: *mut sys::zend_class_entry,
+    lc: &[u8],
+) -> Option<*mut sys::zend_function> {
     let f = call::find_method(ce, lc);
     if !f.is_null() && (*f).type_ as u32 == sys::ZEND_USER_FUNCTION {
         Some(f)
@@ -252,7 +260,10 @@ pub unsafe extern "C" fn construct(ex: Ex, _rv: *mut sys::zval) {
 /// AbstractDriver::__construct()'s check: PHP 8.2.0 to 8.2.3 have fiber GC bugs (php-src #10496).
 unsafe fn check_php_gc_bug() {
     let v = php_version_id();
-    if (80200..80204).contains(&v) && crate::zend::getenv("REVOLT_DRIVER_SUPPRESS_ISSUE_10496").is_none_or(|s| s.is_empty() || s == "0") {
+    if (80200..80204).contains(&v)
+        && crate::zend::getenv("REVOLT_DRIVER_SUPPRESS_ISSUE_10496")
+            .is_none_or(|s| s.is_empty() || s == "0")
+    {
         call::throw_error("Your version of PHP is affected by serious garbage collector bugs related to fibers. Please upgrade to a newer version of PHP, i.e. >= 8.1.17 or => 8.2.4");
     }
 }
@@ -282,7 +293,9 @@ pub unsafe extern "C" fn unserialize(ex: Ex, _rv: *mut sys::zval) {
     if !zpp!(ex, "a", &mut z) {
         return;
     }
-    call::throw_error("Revolt\\EventLoop\\Internal\\AbstractDriver does not support deserialization");
+    call::throw_error(
+        "Revolt\\EventLoop\\Internal\\AbstractDriver does not support deserialization",
+    );
 }
 
 pub unsafe extern "C" fn queue(ex: Ex, rv: *mut sys::zval) {
@@ -291,13 +304,25 @@ pub unsafe extern "C" fn queue(ex: Ex, rv: *mut sys::zval) {
 
 pub unsafe fn queue_d(ex: Ex, _rv: *mut sys::zval, d: D) {
     let n = call::num_args(ex);
-    let o = if n >= 1 { call::closure_arg(ex, 0) } else { null_mut() };
+    let o = if n >= 1 {
+        call::closure_arg(ex, 0)
+    } else {
+        null_mut()
+    };
     let o = if o.is_null() {
         let mut z: *mut sys::zval = null_mut();
         let mut rest: *mut sys::zval = null_mut();
         let mut cnt: u32 = 0;
         let mut named: *mut sys::HashTable = null_mut();
-        if !zpp!(ex, "O*", &mut z, sys::zend_ce_closure, &mut rest, &mut cnt, &mut named) {
+        if !zpp!(
+            ex,
+            "O*",
+            &mut z,
+            sys::zend_ce_closure,
+            &mut rest,
+            &mut cnt,
+            &mut named
+        ) {
             return;
         }
         let _ = named;
@@ -313,11 +338,20 @@ pub unsafe fn push_microtask(d: D, ex: Ex, closure: *mut sys::zend_object) {
     let n = call::num_args(ex) as usize;
     let c = d.c();
     for i in 1..n {
-        c.microtask_args.push_back(Zv(zval::copy_deref(call::arg(ex, i))));
+        c.microtask_args
+            .push_back(Zv(zval::copy_deref(call::arg(ex, i))));
     }
     let named_ht = call::extra_named(ex);
-    let named = if named_ht.is_null() { Zv::undef() } else { Zv(zval::arr_owned(sys::zend_array_dup(named_ht))) };
-    c.microtasks.push_back(Microtask::Php { closure: Zv(zval::obj_ref(closure)), nargs: n.saturating_sub(1) as u32, named });
+    let named = if named_ht.is_null() {
+        Zv::undef()
+    } else {
+        Zv(zval::arr_owned(sys::zend_array_dup(named_ht)))
+    };
+    c.microtasks.push_back(Microtask::Php {
+        closure: Zv(zval::obj_ref(closure)),
+        nargs: n.saturating_sub(1) as u32,
+        named,
+    });
 }
 
 pub unsafe extern "C" fn defer(ex: Ex, rv: *mut sys::zval) {
@@ -326,15 +360,20 @@ pub unsafe extern "C" fn defer(ex: Ex, rv: *mut sys::zval) {
 
 pub unsafe fn defer_d(ex: Ex, rv: *mut sys::zval, d: D) {
     let Some(o) = closure_only(ex) else { return };
-    let d = d;
     let id = run::defer(d, run::php_cb(o));
     ret_id(rv, d, id);
 }
 
 unsafe fn timer(ex: Ex, rv: *mut sys::zval, repeat: bool, d: D) {
-    let Some((t, o)) = float_closure(ex) else { return };
+    let Some((t, o)) = float_closure(ex) else {
+        return;
+    };
     if t < 0.0 {
-        call::throw_error(if repeat { "Interval must be greater than or equal to zero" } else { "Delay must be greater than or equal to zero" });
+        call::throw_error(if repeat {
+            "Interval must be greater than or equal to zero"
+        } else {
+            "Delay must be greater than or equal to zero"
+        });
         return;
     }
     if let Some(id) = run::timer(d, t, run::php_cb(o), repeat) {
@@ -359,7 +398,9 @@ pub unsafe fn repeat_d(ex: Ex, rv: *mut sys::zval, d: D) {
 }
 
 unsafe fn on_stream(ex: Ex, rv: *mut sys::zval, writable: bool, d: D) {
-    let Some((s, o)) = mixed_closure(ex) else { return };
+    let Some((s, o)) = mixed_closure(ex) else {
+        return;
+    };
     let id = run::stream(d, Zv(zval::copy_deref(s)), run::php_cb(o), writable);
     ret_id(rv, d, id);
 }
@@ -390,9 +431,11 @@ pub unsafe fn on_signal_d(ex: Ex, rv: *mut sys::zval, d: D) {
     if !zpp!(ex, "lO", &mut sig, &mut z, sys::zend_ce_closure) {
         return;
     }
-    let d = d;
     if d.c().kind != DriverKind::User && !crate::core::signal::SUPPORTED {
-        call::throw(ce().unsupported_feature, "Signal handling requires the pcntl extension");
+        call::throw(
+            ce().unsupported_feature,
+            "Signal handling requires the pcntl extension",
+        );
         return;
     }
     let id = run::signal(d, sig as i32, run::php_cb((*z).value.obj));
@@ -405,7 +448,6 @@ pub unsafe extern "C" fn enable(ex: Ex, rv: *mut sys::zval) {
 
 pub unsafe fn enable_d(ex: Ex, rv: *mut sys::zval, d: D) {
     let Some(s) = id_arg(ex) else { return };
-    let d = d;
     match run::enable(d, parse_id(s)) {
         Some(true) => ret_str(rv, s),
         Some(false) => {
@@ -489,7 +531,9 @@ pub unsafe extern "C" fn get_type(ex: Ex, rv: *mut sys::zval) {
 }
 
 pub unsafe fn get_type_d(ex: Ex, rv: *mut sys::zval, d: D) {
-    let Some((d, id)) = existing(ex, d) else { return };
+    let Some((d, id)) = existing(ex, d) else {
+        return;
+    };
     let kind = d.c().record(id).unwrap().kind;
     zval::write(rv, zval::obj_ref(type_case(kind)));
 }
@@ -499,7 +543,9 @@ pub unsafe extern "C" fn is_enabled(ex: Ex, rv: *mut sys::zval) {
 }
 
 pub unsafe fn is_enabled_d(ex: Ex, rv: *mut sys::zval, d: D) {
-    let Some((d, id)) = existing(ex, d) else { return };
+    let Some((d, id)) = existing(ex, d) else {
+        return;
+    };
     zval::write(rv, zval::bool(d.c().record(id).unwrap().enabled));
 }
 
@@ -508,7 +554,9 @@ pub unsafe extern "C" fn is_referenced(ex: Ex, rv: *mut sys::zval) {
 }
 
 pub unsafe fn is_referenced_d(ex: Ex, rv: *mut sys::zval, d: D) {
-    let Some((d, id)) = existing(ex, d) else { return };
+    let Some((d, id)) = existing(ex, d) else {
+        return;
+    };
     zval::write(rv, zval::bool(d.c().record(id).unwrap().referenced));
 }
 
@@ -560,7 +608,11 @@ pub unsafe fn set_error_handler_d(ex: Ex, _rv: *mut sys::zval, d: D) {
     if !zpp!(ex, "O!", &mut z, sys::zend_ce_closure) {
         return;
     }
-    let v = if z.is_null() { zval::null() } else { zval::copy(z) };
+    let v = if z.is_null() {
+        zval::null()
+    } else {
+        zval::copy(z)
+    };
     d.c().error_handler.set(v);
 }
 
@@ -644,7 +696,9 @@ pub unsafe fn run_impl(d: D) {
             let desc = interrupt_desc(&i);
             if let Some(v) = run::take_interrupt(i) {
                 drop(v);
-                call::throw_error(&format!("Interrupt from event loop must throw an exception: {desc}"));
+                call::throw_error(&format!(
+                    "Interrupt from event loop must throw an exception: {desc}"
+                ));
             }
         }
     }
@@ -676,10 +730,21 @@ pub unsafe extern "C" fn enqueue_callback(ex: Ex, _rv: *mut sys::zval) {
 pub unsafe extern "C" fn error(ex: Ex, _rv: *mut sys::zval) {
     let mut cl: *mut sys::zval = null_mut();
     let mut e: *mut sys::zval = null_mut();
-    if !zpp!(ex, "OO", &mut cl, sys::zend_ce_closure, &mut e, sys::zend_ce_throwable) {
+    if !zpp!(
+        ex,
+        "OO",
+        &mut cl,
+        sys::zend_ce_closure,
+        &mut e,
+        sys::zend_ce_throwable
+    ) {
         return;
     }
-    run::error(D(call::this(ex)), Desc::Closure(Zv(zval::copy(cl))), Zv(zval::copy(e)));
+    run::error(
+        D(call::this(ex)),
+        Desc::Closure(Zv(zval::copy(cl))),
+        Zv(zval::copy(e)),
+    );
 }
 
 pub unsafe extern "C" fn private_noop(_ex: Ex, _rv: *mut sys::zval) {}
@@ -763,7 +828,13 @@ pub unsafe extern "C" fn destruct(ex: Ex, _rv: *mut sys::zval) {
     }
     // as StreamSelectDriver::__destruct(): signal handlers go (the dispositions are restored)
     let d = D(call::this(ex));
-    let ids: Vec<u64> = d.c().callbacks.values().filter(|r| r.kind == Kind::Signal && r.active).map(|r| r.id).collect();
+    let ids: Vec<u64> = d
+        .c()
+        .callbacks
+        .values()
+        .filter(|r| r.kind == Kind::Signal && r.active)
+        .map(|r| r.id)
+        .collect();
     for id in ids {
         run::deactivate_one(d, id);
     }
@@ -806,13 +877,36 @@ pub unsafe fn register_drivers(ces: &mut Ces) {
     let ms = vec![
         m("__construct", zh!(construct), PUB, NONE, vec![]),
         m("__destruct", zh!(destruct), PUB, NONE, vec![]),
-        m("activate", zh!(native_activate), PRO, T_V, vec![a("callbacks", T_A)]),
-        m("deactivate", zh!(native_deactivate), PRO, T_V, vec![a("callback", T_DCB)]),
-        m("dispatch", zh!(native_dispatch), PRO, T_V, vec![a("blocking", T_B)]),
+        m(
+            "activate",
+            zh!(native_activate),
+            PRO,
+            T_V,
+            vec![a("callbacks", T_A)],
+        ),
+        m(
+            "deactivate",
+            zh!(native_deactivate),
+            PRO,
+            T_V,
+            vec![a("callback", T_DCB)],
+        ),
+        m(
+            "dispatch",
+            zh!(native_dispatch),
+            PRO,
+            T_V,
+            vec![a("blocking", T_B)],
+        ),
         m("now", zh!(native_now), PRO, T_F, vec![]),
         m("getHandle", zh!(get_handle), PUB, T_MIX, vec![]),
     ];
-    ces.native = k::register_class("Revolt\\EventLoop\\Driver\\NativeDriver", ms, ces.abstract_driver, k::FINAL);
+    ces.native = k::register_class(
+        "Revolt\\EventLoop\\Driver\\NativeDriver",
+        ms,
+        ces.abstract_driver,
+        k::FINAL,
+    );
     (*ces.native).__bindgen_anon_2.create_object = Some(create_object);
     run::minit(ces.abstract_driver);
 }

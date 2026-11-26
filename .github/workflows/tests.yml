@@ -3,7 +3,8 @@ name: Tests
 # Every OS, PHP 8.2 to 8.6, NTS and ZTS: the build, Reflection parity with the PHP library,
 # revolt/event-loop's own suite (tests/revolt) and ours (tests/native) against the extension, the
 # same suites against the PHP library (the baseline: tests/native's parity tests must pass on
-# both), and the embedding tests (examples/embedder: tests/embedder). ASan on Linux.
+# both), and the embedding tests (examples/embedder: tests/embedder). ASan on Linux. rustfmt and
+# clippy (-D warnings) on each OS.
 
 on:
   # documentation-only pushes do not run (nor cancel a running test run)
@@ -42,7 +43,7 @@ jobs:
         with:
           php-version: ${{ matrix.php }}
           tools: composer
-          # pcntl and posix: the signal tests (Unix); mbstring: PHPUnit (Windows)
+          # pcntl and posix: the signal and fork tests (Unix); mbstring: PHPUnit (Windows)
           extensions: ${{ startsWith(matrix.os, 'windows') && 'sockets, mbstring' || 'sockets, pcntl, posix' }}
           ini-values: zend.assertions=1
           coverage: none
@@ -159,6 +160,52 @@ jobs:
             embedder.xml
             extension.json
           if-no-files-found: ignore
+
+  # code style: rustfmt (its defaults) and clippy with warnings as errors on each OS (the epoll,
+  # kqueue and Windows backends are cfg'd per OS; the allowed lints are in Cargo.toml's
+  # [workspace.lints])
+  lint:
+    name: "rustfmt and clippy (${{ matrix.os }})"
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15, windows-2022]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.4"
+          coverage: none
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          # Windows: the nightly the test job builds with (ext-php-rs's vectorcall ABI)
+          toolchain: ${{ startsWith(matrix.os, 'windows') && 'nightly-2026-09-02' || 'stable' }}
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: lint
+      - name: rustfmt
+        if: runner.os == 'Linux'
+        run: cargo fmt --all --check
+      - name: libclang (for the Zend Engine bindings) and the build's PHP
+        run: |
+          case "$RUNNER_OS" in
+            Linux)   ls /usr/lib/llvm-*/lib/libclang.so* >/dev/null 2>&1 || { sudo apt-get update -qq && sudo apt-get install -y -qq libclang-dev; }
+                     echo "PHP=$(command -v php)" >> "$GITHUB_ENV"
+                     echo "PHP_CONFIG=$(command -v php-config)" >> "$GITHUB_ENV" ;;
+            macOS)   echo "LIBCLANG_PATH=$(xcode-select -p)/Toolchains/XcodeDefault.xctoolchain/usr/lib" >> "$GITHUB_ENV"
+                     echo "PHP=$(command -v php)" >> "$GITHUB_ENV"
+                     echo "PHP_CONFIG=$(command -v php-config)" >> "$GITHUB_ENV" ;;
+            Windows) echo "LIBCLANG_PATH=C:\\Program Files\\LLVM\\bin" >> "$GITHUB_ENV"
+                     echo "CLANG_PATH=C:\\Program Files\\LLVM\\bin\\clang.exe" >> "$GITHUB_ENV"
+                     echo "PHP=$(cygpath -w "$(command -v php.exe)")" >> "$GITHUB_ENV" ;;
+          esac
+      - name: clippy
+        run: cargo clippy --locked --workspace --all-targets -- -D warnings
 
   asan:
     name: "ASan (ubuntu-24.04 / PHP ${{ matrix.php }})"

@@ -11,7 +11,10 @@
 use std::process::Command;
 
 fn run(cmd: &str, args: &[&str]) -> String {
-    let out = Command::new(cmd).args(args).output().unwrap_or_else(|e| panic!("cannot run {cmd}: {e}"));
+    let out = Command::new(cmd)
+        .args(args)
+        .output()
+        .unwrap_or_else(|e| panic!("cannot run {cmd}: {e}"));
     assert!(out.status.success(), "{cmd} {args:?} failed");
     String::from_utf8(out.stdout).unwrap().trim().to_owned()
 }
@@ -52,8 +55,14 @@ fn main() {
     let (api, zts, build_id) = if windows {
         let php = std::env::var("PHP").unwrap_or_else(|_| "php".into());
         let info = run(&php, &["-n", "-i"]);
-        let key = |k: &str| info.lines().find_map(|l| l.strip_prefix(k)).map(|v| v.trim().to_owned());
-        let api: u32 = key("PHP API => ").and_then(|v| v.parse().ok()).expect("PHP API number from php -i");
+        let key = |k: &str| {
+            info.lines()
+                .find_map(|l| l.strip_prefix(k))
+                .map(|v| v.trim().to_owned())
+        };
+        let api: u32 = key("PHP API => ")
+            .and_then(|v| v.parse().ok())
+            .expect("PHP API number from php -i");
         // "API20240924,NTS,VS17" (the compiler is part of the id on Windows)
         let build_id = key("PHP Extension Build => ").expect("PHP Extension Build from php -i");
         let zts = thread_safety(&php);
@@ -78,7 +87,11 @@ fn main() {
             panic!("PHP ({php}) is {php_version} but PHP_CONFIG ({config}) describes {version}: set both to the same PHP");
         }
         let zts = thread_safety(&php);
-        (api, zts, format!("API{api},{}", if zts { "TS" } else { "NTS" }))
+        (
+            api,
+            zts,
+            format!("API{api},{}", if zts { "TS" } else { "NTS" }),
+        )
     };
     for cfg in cfgs(api) {
         println!("cargo:rustc-cfg={cfg}");

@@ -64,7 +64,9 @@ mod imp {
             libc::sigfillset(&mut sa.sa_mask);
             let mut old: libc::sigaction = std::mem::zeroed();
             if libc::sigaction(sig, &sa, &mut old) != 0 {
-                return Err(std::io::Error::last_os_error().raw_os_error().unwrap_or(libc::EINVAL));
+                return Err(std::io::Error::last_os_error()
+                    .raw_os_error()
+                    .unwrap_or(libc::EINVAL));
             }
             t[sig as usize] = Some(Installed { refs: 1, old });
         }
@@ -73,7 +75,9 @@ mod imp {
 
     fn uninstall(sig: i32) {
         let mut t = INSTALLED.lock().unwrap();
-        let Some(slot) = t.get_mut(sig as usize) else { return };
+        let Some(slot) = t.get_mut(sig as usize) else {
+            return;
+        };
         let Some(i) = slot else { return };
         i.refs -= 1;
         if i.refs == 0 {
@@ -91,23 +95,28 @@ mod imp {
         seen: Vec<(i32, u64)>,
         pipe: Option<(i32, i32)>,
         slot: Option<usize>,
+        fork_gen: u64,
     }
 
     impl Watchers {
         /// Watches `sig` for callback `id`; Err((errno, message)) when it cannot be.
         pub fn add(&mut self, sig: i32, id: crate::core::Cid) -> Result<(), (i32, String)> {
-            self.ensure_pipe().map_err(|e| (e, std::io::Error::from_raw_os_error(e).to_string()))?;
+            self.ensure_pipe()
+                .map_err(|e| (e, std::io::Error::from_raw_os_error(e).to_string()))?;
             if !self.by_signal.contains_key(&sig) {
                 install(sig).map_err(|e| (e, std::io::Error::from_raw_os_error(e).to_string()))?;
                 let at = self.seen.partition_point(|&(s, _)| s < sig);
-                self.seen.insert(at, (sig, COUNTERS[sig as usize].load(Ordering::SeqCst)));
+                self.seen
+                    .insert(at, (sig, COUNTERS[sig as usize].load(Ordering::SeqCst)));
             }
             self.by_signal.entry(sig).or_default().push(id);
             Ok(())
         }
 
         pub fn remove(&mut self, sig: i32, id: u64) {
-            let Some(v) = self.by_signal.get_mut(&sig) else { return };
+            let Some(v) = self.by_signal.get_mut(&sig) else {
+                return;
+            };
             if let Some(p) = v.iter().position(|x| x.id == id) {
                 v.remove(p);
             }
@@ -146,21 +155,56 @@ mod imp {
             }
         }
 
+        /// In a fork() child (first call there) that inherited signal watchers: their wake pipe
+        /// is the parent's (either process would drain the other's wake-ups, and the child's
+        /// handler would write to the parent's), so the child gets one of its own. True when
+        /// the pipe changed (the reactor must be given the new `wake_fd()`); if no pipe can be
+        /// made, signals are still seen at every tick and end a wait with EINTR, but a wait
+        /// can miss one that comes just before it.
+        #[inline(always)]
+        pub fn check_fork(&mut self) -> bool {
+            let g = super::super::backend::FORK_GEN.load(Ordering::Relaxed);
+            self.fork_gen != g && self.rebuild_after_fork(g)
+        }
+
+        #[cold]
+        #[inline(never)]
+        fn rebuild_after_fork(&mut self, g: u64) -> bool {
+            self.fork_gen = g;
+            if self.pipe.is_none() {
+                return false;
+            }
+            // (the child's copies of the parent's pipe only)
+            self.close_pipe();
+            let _ = self.ensure_pipe();
+            true
+        }
+
         fn ensure_pipe(&mut self) -> Result<(), i32> {
+            self.check_fork();
             if self.pipe.is_some() {
                 return Ok(());
             }
             let mut fds = [0i32; 2];
             unsafe {
                 if libc::pipe(fds.as_mut_ptr()) != 0 {
-                    return Err(std::io::Error::last_os_error().raw_os_error().unwrap_or(libc::EMFILE));
+                    return Err(std::io::Error::last_os_error()
+                        .raw_os_error()
+                        .unwrap_or(libc::EMFILE));
                 }
                 for fd in fds {
-                    libc::fcntl(fd, libc::F_SETFL, libc::fcntl(fd, libc::F_GETFL) | libc::O_NONBLOCK);
+                    libc::fcntl(
+                        fd,
+                        libc::F_SETFL,
+                        libc::fcntl(fd, libc::F_GETFL) | libc::O_NONBLOCK,
+                    );
                     libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC);
                 }
             }
-            let slot = WAKE.iter().position(|w| w.compare_exchange(-1, fds[1], Ordering::SeqCst, Ordering::SeqCst).is_ok());
+            let slot = WAKE.iter().position(|w| {
+                w.compare_exchange(-1, fds[1], Ordering::SeqCst, Ordering::SeqCst)
+                    .is_ok()
+            });
             if slot.is_none() {
                 unsafe {
                     libc::close(fds[0]);
@@ -188,7 +232,7 @@ mod imp {
 
     impl Drop for Watchers {
         fn drop(&mut self) {
-            for (&sig, _) in self.by_signal.iter() {
+            for &sig in self.by_signal.keys() {
                 uninstall(sig);
             }
             self.by_signal.clear();
@@ -217,6 +261,9 @@ mod imp {
         }
         pub fn take_delivered(&mut self, _woke: bool, out: &mut Vec<i32>) {
             out.clear();
+        }
+        pub fn check_fork(&mut self) -> bool {
+            false
         }
     }
 }

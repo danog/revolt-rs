@@ -70,7 +70,11 @@ pub unsafe fn each(ht: *const sys::HashTable, mut f: impl FnMut(Key, *mut sys::z
             if zval::is_undef(z) {
                 continue;
             }
-            let k = if (*b).key.is_null() { Key::Index((*b).h) } else { Key::Str((*b).key) };
+            let k = if (*b).key.is_null() {
+                Key::Index((*b).h)
+            } else {
+                Key::Str((*b).key)
+            };
             if !f(k, z) {
                 return;
             }

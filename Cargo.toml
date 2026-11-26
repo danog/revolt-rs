@@ -19,6 +19,15 @@ revolt-rs = { path = "crates/revolt-rs" }
 [workspace]
 members = ["crates/revolt-rs", "examples/embedder"]
 
+# CI: clippy with warnings as errors (tests.yml's lint job)
+[workspace.lints.clippy]
+# zpp!'s out-pointers are evaluated in its unsafe block (the callers pass `&mut local`s); an
+# #[allow] on an exported macro does not reach its expansions
+macro_metavars_in_unsafe = "allow"
+
+[lints]
+workspace = true
+
 [profile.release]
 opt-level = 3
 lto = "fat"

@@ -9,7 +9,8 @@ use std::ptr::null_mut;
 
 pub type Ex = *mut sys::zend_execute_data;
 
-const FRAME_SLOT: usize = std::mem::size_of::<sys::zend_execute_data>().div_ceil(std::mem::size_of::<sys::zval>());
+const FRAME_SLOT: usize =
+    std::mem::size_of::<sys::zend_execute_data>().div_ceil(std::mem::size_of::<sys::zval>());
 const ZEND_CALL_HAS_EXTRA_NAMED_PARAMS: u32 = 1 << 27;
 
 extern "C" {
@@ -70,7 +71,11 @@ macro_rules! zpp {
 /// Runs zend_parse_parameters; arguments beyond the spec are ignored, as PHP functions (which
 /// revolt/event-loop's are) ignore them.
 #[doc(hidden)]
-pub unsafe fn parse(n: u32, spec: *const c_char, f: impl FnOnce(u32, *const c_char) -> sys::zend_result) -> bool {
+pub unsafe fn parse(
+    n: u32,
+    spec: *const c_char,
+    f: impl FnOnce(u32, *const c_char) -> sys::zend_result,
+) -> bool {
     let s = CStr::from_ptr(spec).to_bytes();
     let n = if s.iter().any(|&c| c == b'*' || c == b'+') {
         n
@@ -155,7 +160,11 @@ pub struct Callee {
 #[inline]
 pub unsafe fn callee_of(o: *mut sys::zend_object) -> Option<Callee> {
     let h = (*(*o).handlers).get_closure?;
-    let mut c = Callee { func: null_mut(), obj: null_mut(), scope: null_mut() };
+    let mut c = Callee {
+        func: null_mut(),
+        obj: null_mut(),
+        scope: null_mut(),
+    };
     if h(o, &mut c.scope, &mut c.func, &mut c.obj, false) != sys::ZEND_RESULT_CODE_SUCCESS {
         return None;
     }
@@ -171,7 +180,11 @@ pub unsafe fn call(c: &Callee, params: &mut [zval::Z], named: *mut sys::HashTabl
     fci.size = std::mem::size_of::<sys::zend_fcall_info>();
     fci.function_name = std::mem::ManuallyDrop::into_inner(zval::undef());
     fci.retval = rv.as_ptr();
-    fci.params = if params.is_empty() { null_mut() } else { params.as_mut_ptr() as *mut sys::zval };
+    fci.params = if params.is_empty() {
+        null_mut()
+    } else {
+        params.as_mut_ptr() as *mut sys::zval
+    };
     fci.param_count = params.len() as u32;
     fci.object = c.obj;
     fci.named_params = named;
@@ -193,7 +206,10 @@ pub unsafe fn call_closure(o: *mut sys::zend_object, params: &mut [zval::Z]) -> 
 }
 
 /// The method `lcname` (lower case) of class `ce`, or null.
-pub unsafe fn find_method(ce: *mut sys::zend_class_entry, lcname: &[u8]) -> *mut sys::zend_function {
+pub unsafe fn find_method(
+    ce: *mut sys::zend_class_entry,
+    lcname: &[u8],
+) -> *mut sys::zend_function {
     let z = super::hash::find_str(&(*ce).function_table, lcname);
     if z.is_null() {
         null_mut()
@@ -210,21 +226,48 @@ pub unsafe fn method(o: *mut sys::zend_object, lcname: &[u8], params: &mut [zval
         let mut obj = zval::obj_ref(o);
         let mut name = zval::string(lcname);
         let mut rv = Zv::undef();
-        sys::_call_user_function_impl(&mut *obj, &mut *name, rv.as_ptr(), params.len() as u32, params.as_mut_ptr() as *mut sys::zval, null_mut());
+        sys::_call_user_function_impl(
+            &mut *obj,
+            &mut *name,
+            rv.as_ptr(),
+            params.len() as u32,
+            params.as_mut_ptr() as *mut sys::zval,
+            null_mut(),
+        );
         zval::dtor(&mut name);
         zval::dtor(&mut obj);
         return rv;
     }
-    call(&Callee { func: f, obj: o, scope: (*o).ce }, params, null_mut())
+    call(
+        &Callee {
+            func: f,
+            obj: o,
+            scope: (*o).ce,
+        },
+        params,
+        null_mut(),
+    )
 }
 
 /// A static method of `ce` by lower-case name.
-pub unsafe fn static_method(ce: *mut sys::zend_class_entry, lcname: &[u8], params: &mut [zval::Z]) -> Zv {
+pub unsafe fn static_method(
+    ce: *mut sys::zend_class_entry,
+    lcname: &[u8],
+    params: &mut [zval::Z],
+) -> Zv {
     let f = find_method(ce, lcname);
     if f.is_null() {
         return Zv::undef();
     }
-    call(&Callee { func: f, obj: null_mut(), scope: ce }, params, null_mut())
+    call(
+        &Callee {
+            func: f,
+            obj: null_mut(),
+            scope: ce,
+        },
+        params,
+        null_mut(),
+    )
 }
 
 /// A registered class by lower-case name, without autoloading; null when missing.
@@ -249,12 +292,18 @@ pub unsafe fn lookup_class_autoload(name: &[u8]) -> *mut sys::zend_class_entry {
 
 /// instanceof_function
 #[inline(always)]
-pub unsafe fn instance_of(ce: *const sys::zend_class_entry, of: *const sys::zend_class_entry) -> bool {
+pub unsafe fn instance_of(
+    ce: *const sys::zend_class_entry,
+    of: *const sys::zend_class_entry,
+) -> bool {
     ce == of || sys::instanceof_function_slow(ce, of)
 }
 
 /// `new $ce(...$params)`: the object, or null with an exception thrown.
-pub unsafe fn new_object(ce: *mut sys::zend_class_entry, params: &mut [zval::Z]) -> *mut sys::zend_object {
+pub unsafe fn new_object(
+    ce: *mut sys::zend_class_entry,
+    params: &mut [zval::Z],
+) -> *mut sys::zend_object {
     let mut z = zval::undef();
     if sys::object_init_ex(&mut *z, ce) != sys::ZEND_RESULT_CODE_SUCCESS {
         return null_mut();
@@ -262,7 +311,15 @@ pub unsafe fn new_object(ce: *mut sys::zend_class_entry, params: &mut [zval::Z])
     let o = z.value.obj;
     let ctor = (*ce).constructor;
     if !ctor.is_null() {
-        let _ = call(&Callee { func: ctor, obj: o, scope: ce }, params, null_mut());
+        let _ = call(
+            &Callee {
+                func: ctor,
+                obj: o,
+                scope: ce,
+            },
+            params,
+            null_mut(),
+        );
         if has_exception() {
             zval::dtor(&mut z);
             return null_mut();

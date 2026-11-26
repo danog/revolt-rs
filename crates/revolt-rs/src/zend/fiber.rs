@@ -31,7 +31,10 @@ unsafe fn zf(o: *mut sys::zend_object) -> *mut sys::zend_fiber {
 
 #[inline(always)]
 pub unsafe fn status(o: *mut sys::zend_object) -> u32 {
-    (*zf(o)).context.status as u32
+    // (the enum's bindgen type is u32 on Unix, i32 with MSVC)
+    #[allow(clippy::unnecessary_cast)]
+    let s = (*zf(o)).context.status as u32;
+    s
 }
 
 /// Fiber::isTerminated()
@@ -47,7 +50,11 @@ pub unsafe fn is_destroyed(o: *mut sys::zend_object) -> bool {
 }
 
 /// A static internal function usable as a Closure (for fiber bodies and callbacks): leaked.
-pub unsafe fn internal_function(name: &str, handler: sys::zif_handler, scope: *mut sys::zend_class_entry) -> *mut sys::zend_function {
+pub unsafe fn internal_function(
+    name: &str,
+    handler: sys::zif_handler,
+    scope: *mut sys::zend_class_entry,
+) -> *mut sys::zend_function {
     let f: *mut sys::zend_function = Box::leak(Box::new(std::mem::zeroed::<sys::zend_function>()));
     let i = std::ptr::addr_of_mut!((*f).internal_function);
     (*i).type_ = sys::ZEND_INTERNAL_FUNCTION as u8;
@@ -61,9 +68,19 @@ pub unsafe fn internal_function(name: &str, handler: sys::zif_handler, scope: *m
 /// A Closure over `func` with `$this` = `this` (a new reference) or none.
 pub unsafe fn closure(func: *mut sys::zend_function, this: *mut sys::zend_object) -> Zv {
     let mut rv = Zv::undef();
-    let mut t = if this.is_null() { zval::undef() } else { zval::obj_ref(this) };
+    let mut t = if this.is_null() {
+        zval::undef()
+    } else {
+        zval::obj_ref(this)
+    };
     let scope = (*func).common.scope;
-    sys::zend_create_fake_closure(rv.as_ptr(), func, scope, if this.is_null() { scope } else { (*this).ce }, if this.is_null() { null_mut() } else { &mut *t });
+    sys::zend_create_fake_closure(
+        rv.as_ptr(),
+        func,
+        scope,
+        if this.is_null() { scope } else { (*this).ce },
+        if this.is_null() { null_mut() } else { &mut *t },
+    );
     zval::dtor(&mut t);
     rv
 }
@@ -76,7 +93,10 @@ pub unsafe fn new(callable: &mut Zv) -> *mut sys::zend_object {
 #[cfg(php84)]
 unsafe fn blocked() -> bool {
     if sys::zend_fiber_switch_blocked() {
-        sys::zend_throw_error(FIBER_ERROR, c"Cannot switch fibers in current execution context".as_ptr());
+        sys::zend_throw_error(
+            FIBER_ERROR,
+            c"Cannot switch fibers in current execution context".as_ptr(),
+        );
         return true;
     }
     false
@@ -91,7 +111,10 @@ pub unsafe fn start(o: *mut sys::zend_object) -> Zv {
             return rv;
         }
         if status(o) != STATUS_INIT {
-            sys::zend_throw_error(FIBER_ERROR, c"Cannot start a fiber that has already been started".as_ptr());
+            sys::zend_throw_error(
+                FIBER_ERROR,
+                c"Cannot start a fiber that has already been started".as_ptr(),
+            );
             return rv;
         }
         let f = zf(o);
@@ -117,7 +140,10 @@ pub unsafe fn resume(o: *mut sys::zend_object, value: &mut zval::Z) -> Zv {
         }
         let f = zf(o);
         if status(o) != STATUS_SUSPENDED || !(*f).caller.is_null() {
-            sys::zend_throw_error(FIBER_ERROR, c"Cannot resume a fiber that is not suspended".as_ptr());
+            sys::zend_throw_error(
+                FIBER_ERROR,
+                c"Cannot resume a fiber that is not suspended".as_ptr(),
+            );
             return rv;
         }
         sys::zend_fiber_resume(f, &mut **value, rv.as_ptr());
@@ -134,7 +160,15 @@ pub unsafe fn throw_into(o: *mut sys::zend_object, ex: &mut zval::Z) -> Zv {
     if THROW_FN.is_null() {
         THROW_FN = call::find_method(sys::zend_ce_fiber, b"throw");
     }
-    call::call(&call::Callee { func: THROW_FN, obj: o, scope: (*o).ce }, std::slice::from_mut(ex), null_mut())
+    call::call(
+        &call::Callee {
+            func: THROW_FN,
+            obj: o,
+            scope: (*o).ce,
+        },
+        std::slice::from_mut(ex),
+        null_mut(),
+    )
 }
 
 /// Fiber::suspend($value) from the running fiber: the value it is resumed with (UNDEF when an
@@ -149,7 +183,10 @@ pub unsafe fn suspend(value: &mut zval::Z) -> Zv {
             return rv;
         }
         if (*f).flags as u32 & FLAG_DESTROYED != 0 {
-            sys::zend_throw_error(FIBER_ERROR, c"Cannot suspend in a force-closed fiber".as_ptr());
+            sys::zend_throw_error(
+                FIBER_ERROR,
+                c"Cannot suspend in a force-closed fiber".as_ptr(),
+            );
             return rv;
         }
         if blocked() {
@@ -161,7 +198,15 @@ pub unsafe fn suspend(value: &mut zval::Z) -> Zv {
     #[cfg(not(php84))]
     {
         let suspend = call::find_method(sys::zend_ce_fiber, b"suspend");
-        call::call(&call::Callee { func: suspend, obj: null_mut(), scope: sys::zend_ce_fiber }, std::slice::from_mut(value), null_mut())
+        call::call(
+            &call::Callee {
+                func: suspend,
+                obj: null_mut(),
+                scope: sys::zend_ce_fiber,
+            },
+            std::slice::from_mut(value),
+            null_mut(),
+        )
     }
 }
 
@@ -252,7 +297,7 @@ pub mod inflight {
 
     /// Makes the values held for fiber `f` (a \Fiber, not null) visible to the cycle collector.
     pub unsafe fn track(f: *mut sys::zend_object) {
-        if (*f).handlers != HANDLERS as *const _ {
+        if !std::ptr::eq((*f).handlers, HANDLERS) {
             (*f).handlers = handlers(f);
         }
     }
@@ -261,7 +306,10 @@ pub mod inflight {
     /// [`take`]; returns a pointer to them (the parameters of a call: valid until the next hold
     /// or take on this thread, so a call must be made right away).
     #[inline]
-    pub fn hold<I: IntoIterator<Item = zval::Z>>(f: *mut sys::zend_object, values: I) -> (*mut zval::Z, usize) {
+    pub fn hold<I: IntoIterator<Item = zval::Z>>(
+        f: *mut sys::zend_object,
+        values: I,
+    ) -> (*mut zval::Z, usize) {
         unsafe {
             let fr = &mut *frames(f as usize);
             let start = fr.vals.len();
@@ -290,24 +338,34 @@ pub mod inflight {
 
     /// The values of the last [`hold`] for `f` (null: {main}), owned by the caller again.
     #[inline]
-    pub fn take(f: *mut sys::zend_object) -> Taken {
-        let mut out = Taken { len: 0, inline: [const { std::mem::MaybeUninit::uninit() }; INLINE], heap: Vec::new() };
+    pub unsafe fn take(f: *mut sys::zend_object) -> Taken {
+        let mut out = Taken {
+            len: 0,
+            inline: [const { std::mem::MaybeUninit::uninit() }; INLINE],
+            heap: Vec::new(),
+        };
         unsafe {
             let fr = find(f as usize);
             if fr.is_null() {
                 return out;
             }
             let fr = &mut *fr;
-            let Some(start) = fr.marks.pop() else { return out };
+            let Some(start) = fr.marks.pop() else {
+                return out;
+            };
             let n = fr.vals.len() - start;
             out.len = n;
             if n <= INLINE {
-                std::ptr::copy_nonoverlapping(fr.vals.as_ptr().add(start), out.inline.as_mut_ptr() as *mut zval::Z, n);
+                std::ptr::copy_nonoverlapping(
+                    fr.vals.as_ptr().add(start),
+                    out.inline.as_mut_ptr() as *mut zval::Z,
+                    n,
+                );
                 fr.vals.set_len(start);
             } else {
                 out.heap = fr.vals.split_off(start);
             }
-            if fr.marks.is_empty() && !f.is_null() && (*f).handlers != HANDLERS as *const _ {
+            if fr.marks.is_empty() && !f.is_null() && !std::ptr::eq((*f).handlers, HANDLERS) {
                 // a fiber whose free_obj is not ours: its entry must not outlive it
                 drop(remove(f as usize));
             }
@@ -331,7 +389,9 @@ pub mod inflight {
         fn deref(&self) -> &[zval::Z] {
             if self.len <= INLINE {
                 // SAFETY: initialised up to len
-                unsafe { std::slice::from_raw_parts(self.inline.as_ptr() as *const zval::Z, self.len) }
+                unsafe {
+                    std::slice::from_raw_parts(self.inline.as_ptr() as *const zval::Z, self.len)
+                }
             } else {
                 &self.heap
             }
@@ -343,14 +403,23 @@ pub mod inflight {
         fn deref_mut(&mut self) -> &mut [zval::Z] {
             if self.len <= INLINE {
                 // SAFETY: initialised up to len
-                unsafe { std::slice::from_raw_parts_mut(self.inline.as_mut_ptr() as *mut zval::Z, self.len) }
+                unsafe {
+                    std::slice::from_raw_parts_mut(
+                        self.inline.as_mut_ptr() as *mut zval::Z,
+                        self.len,
+                    )
+                }
             } else {
                 &mut self.heap
             }
         }
     }
 
-    unsafe extern "C" fn get_gc(o: *mut sys::zend_object, table: *mut *mut sys::zval, n: *mut c_int) -> *mut sys::HashTable {
+    unsafe extern "C" fn get_gc(
+        o: *mut sys::zend_object,
+        table: *mut *mut sys::zval,
+        n: *mut c_int,
+    ) -> *mut sys::HashTable {
         let ht = ORIG_GC.unwrap()(o, table, n);
         let fr = find(o as usize);
         if fr.is_null() || (*fr).vals.is_empty() {

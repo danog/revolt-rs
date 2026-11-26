@@ -112,7 +112,11 @@ pub fn ptr(p: *mut std::ffi::c_void) -> Z {
 #[inline(always)]
 pub unsafe fn str_owned(s: *mut sys::zend_string) -> Z {
     let interned = (*s).gc.u.type_info & sys::IS_STR_INTERNED != 0;
-    let mut z = with(if interned { STRING as u32 } else { STRING as u32 | REFCOUNTED });
+    let mut z = with(if interned {
+        STRING as u32
+    } else {
+        STRING as u32 | REFCOUNTED
+    });
     z.value.str_ = s;
     z
 }
@@ -148,7 +152,11 @@ pub unsafe fn obj_ref(o: *mut sys::zend_object) -> Z {
 #[inline(always)]
 pub unsafe fn arr_owned(a: *mut sys::zend_array) -> Z {
     let immutable = (*a).gc.u.type_info & sys::GC_IMMUTABLE != 0;
-    let mut z = with(if immutable { ARRAY as u32 } else { ARRAY as u32 | REFCOUNTED | COLLECTABLE });
+    let mut z = with(if immutable {
+        ARRAY as u32
+    } else {
+        ARRAY as u32 | REFCOUNTED | COLLECTABLE
+    });
     z.value.arr = a;
     z
 }
@@ -232,7 +240,10 @@ pub unsafe fn dtor(z: impl AsZ) {
     if is_refcounted(z) {
         let rc = (*z).value.counted;
         let ti = (*rc).gc.u.type_info;
-        if (*rc).gc.refcount > 1 && ti & GC_TYPE_MASK != REFERENCE as u32 && ti & (GC_INFO_MASK | GC_NOT_COLLECTABLE) != 0 {
+        if (*rc).gc.refcount > 1
+            && ti & GC_TYPE_MASK != REFERENCE as u32
+            && ti & (GC_INFO_MASK | GC_NOT_COLLECTABLE) != 0
+        {
             (*rc).gc.refcount -= 1;
         } else {
             // decrements, destroys at 0, else buffers a possible cycle root

@@ -45,6 +45,7 @@ pub unsafe fn minit(module_number: i32) -> bool {
 /// never owns them and only uses whatever implements them (another revolt-rs copy, or the PHP
 /// library through the PHP-call fallback of `crate::embed`).
 pub unsafe fn minit_with(_module_number: i32, register_classes: bool) -> bool {
+    crate::core::backend::minit();
     zend::fiber::minit();
     let ct = (*zend::cg()).class_table;
     if !register_classes || !zend::hash::find_str(ct, b"revolt\\eventloop").is_null() {
@@ -73,14 +74,25 @@ pub unsafe fn mshutdown() {}
 /// phpinfo() rows.
 pub unsafe fn minfo() {
     sys::php_info_print_table_start();
-    zend::php_info_print_table_header(2, c"revolt-rs (native revolt/event-loop)".as_ptr(), c"enabled".as_ptr());
+    zend::php_info_print_table_header(
+        2,
+        c"revolt-rs (native revolt/event-loop)".as_ptr(),
+        c"enabled".as_ptr(),
+    );
     let row = |k: &std::ffi::CStr, v: &str| {
         let v = std::ffi::CString::new(v).unwrap();
         zend::php_info_print_table_row(2, k.as_ptr(), v.as_ptr());
     };
     row(c"revolt-rs version", VERSION);
     row(c"revolt/event-loop API", REVOLT_VERSION);
-    row(c"Classes registered by", if is_owner() { "this module" } else { "another module (revolt-rs copy)" });
+    row(
+        c"Classes registered by",
+        if is_owner() {
+            "this module"
+        } else {
+            "another module (revolt-rs copy)"
+        },
+    );
     #[cfg(target_os = "linux")]
     row(c"Reactor", "epoll");
     #[cfg(all(unix, not(target_os = "linux")))]

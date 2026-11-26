@@ -7,6 +7,15 @@
 //!   disabling a watcher between two polls costs no system call.
 //! - fds the poller refuses (regular files on epoll, closed fds) are "always ready", as select
 //!   reports them.
+//! - fork() (also from inside a running loop: amphp's ForkContext, Psalm's worker pool): the
+//!   child's state is a copy of the parent's, but an epoll instance and a timerfd are shared
+//!   with the parent and a kqueue is not inherited. A pthread_atfork child handler bumps
+//!   `FORK_GEN`; the child's next poll (or a call that would touch the poller) then drops the
+//!   inherited poller and timer without touching them (closing the child's copies only),
+//!   forgets every registration, and registers its own watchers and armed sources with a new
+//!   poller. Changes the parent had queued at the fork are not replayed: their removals were
+//!   the parent's registrations. Cost: one relaxed atomic load per poll; enabling, disabling
+//!   and re-arming a registered source check nothing.
 //! - macOS: kevent64() (a poll that does not wait costs ~0.15 µs; kevent() with a zero timeout
 //!   ~12 µs).
 //! - macOS: timed waits go through a one-shot EVFILT_TIMER with NOTE_CRITICAL (kqueue even when
@@ -30,6 +39,9 @@
 
 use std::collections::HashMap;
 use std::hash::BuildHasherDefault;
+use std::sync::atomic::AtomicU64;
+#[cfg(unix)]
+use std::sync::atomic::Ordering;
 
 pub const READ: u8 = 1;
 pub const WRITE: u8 = 2;
@@ -72,12 +84,32 @@ struct SrcEntry {
     /// the group (1-based) of the waiter / of the last arm
     group: u32,
     /// registered with the poller (Unix)
+    #[cfg_attr(windows, allow(dead_code))]
     registered: bool,
     /// readiness seen while nobody waited for it (READ, WRITE, ERR)
     ready: u8,
     /// what the armed waiter waits for (0: not armed)
     want: u8,
     token: u64,
+}
+
+/// Bumped in fork() children (pthread_atfork).
+pub static FORK_GEN: AtomicU64 = AtomicU64::new(0);
+
+#[cfg(unix)]
+extern "C" fn atfork_child() {
+    FORK_GEN.fetch_add(1, Ordering::SeqCst);
+}
+
+/// MINIT: the fork hook (once per process).
+pub fn minit() {
+    #[cfg(unix)]
+    {
+        static ONCE: std::sync::Once = std::sync::Once::new();
+        ONCE.call_once(|| unsafe {
+            libc::pthread_atfork(None, None, Some(atfork_child));
+        });
+    }
 }
 
 #[derive(Default)]
@@ -98,7 +130,8 @@ pub struct FdEntry {
 
 impl FdEntry {
     fn want(&self) -> u8 {
-        (if self.readers.is_empty() { 0 } else { READ }) | (if self.writers.is_empty() { 0 } else { WRITE })
+        (if self.readers.is_empty() { 0 } else { READ })
+            | (if self.writers.is_empty() { 0 } else { WRITE })
     }
 }
 
@@ -114,6 +147,8 @@ pub struct Reactor {
     spare: Vec<Vec<super::Cid>>,
     #[cfg(unix)]
     poller: i32,
+    #[cfg(unix)]
+    fork_gen: u64,
     /// the read end of the signal wake pipe, polled too
     wake: i64,
     #[cfg(target_os = "linux")]
@@ -167,23 +202,50 @@ fn kev(kq: i32, changes: &[Kev], events: &mut [Kev], timeout: Option<&libc::time
     #[cfg(target_os = "macos")]
     {
         let (flags, tsp) = match timeout {
-            Some(t) if t.tv_sec == 0 && t.tv_nsec == 0 => (libc::KEVENT_FLAG_IMMEDIATE, std::ptr::null()),
+            Some(t) if t.tv_sec == 0 && t.tv_nsec == 0 => {
+                (libc::KEVENT_FLAG_IMMEDIATE, std::ptr::null())
+            }
             Some(t) => (0, t as *const libc::timespec),
             None => (0, std::ptr::null()),
         };
         // SAFETY: valid buffers of the given lengths
-        unsafe { libc::kevent64(kq, changes.as_ptr(), changes.len() as i32, events.as_mut_ptr(), events.len() as i32, flags, tsp) }
+        unsafe {
+            libc::kevent64(
+                kq,
+                changes.as_ptr(),
+                changes.len() as i32,
+                events.as_mut_ptr(),
+                events.len() as i32,
+                flags,
+                tsp,
+            )
+        }
     }
     #[cfg(not(target_os = "macos"))]
     {
         let tsp = timeout.map_or(std::ptr::null(), |t| t as *const libc::timespec);
         // SAFETY: valid buffers of the given lengths
-        unsafe { libc::kevent(kq, changes.as_ptr(), changes.len() as i32, events.as_mut_ptr(), events.len() as i32, tsp) }
+        unsafe {
+            libc::kevent(
+                kq,
+                changes.as_ptr(),
+                changes.len() as i32,
+                events.as_mut_ptr(),
+                events.len() as i32,
+                tsp,
+            )
+        }
     }
 }
 
 /// A ready fd: (fd, readable, writable)
 pub type Ready = (i64, bool, bool);
+
+impl Default for Reactor {
+    fn default() -> Reactor {
+        Reactor::new()
+    }
+}
 
 impl Reactor {
     pub fn new() -> Reactor {
@@ -195,6 +257,8 @@ impl Reactor {
             spare: Vec::new(),
             #[cfg(unix)]
             poller: -1,
+            #[cfg(unix)]
+            fork_gen: FORK_GEN.load(Ordering::Relaxed),
             wake: -1,
             #[cfg(unix)]
             events: Vec::new(),
@@ -216,7 +280,11 @@ impl Reactor {
 
     pub fn add(&mut self, fd: i64, socket: bool, res: i64, id: super::Cid, dir: u8) {
         let spare = &mut self.spare;
-        let e = self.fds.entry(fd).or_insert_with(|| FdEntry { readers: spare.pop().unwrap_or_default(), writers: spare.pop().unwrap_or_default(), ..FdEntry::default() });
+        let e = self.fds.entry(fd).or_insert_with(|| FdEntry {
+            readers: spare.pop().unwrap_or_default(),
+            writers: spare.pop().unwrap_or_default(),
+            ..FdEntry::default()
+        });
         e.socket = socket;
         if e.want() == 0 || e.res != res {
             // the fd may have been closed and reused since it was registered: register anew
@@ -239,8 +307,14 @@ impl Reactor {
     }
 
     pub fn del(&mut self, fd: i64, id: u64, dir: u8) {
-        let Some(e) = self.fds.get_mut(&fd) else { return };
-        let list = if dir == READ { &mut e.readers } else { &mut e.writers };
+        let Some(e) = self.fds.get_mut(&fd) else {
+            return;
+        };
+        let list = if dir == READ {
+            &mut e.readers
+        } else {
+            &mut e.writers
+        };
         if let Some(p) = list.iter().position(|x| x.id == id) {
             list.remove(p);
         }
@@ -255,6 +329,9 @@ impl Reactor {
         if self.wake == fd {
             return;
         }
+        // a fork child must not change the parent's poller (the old pipe's registration there is
+        // the parent's)
+        self.check_fork();
         #[cfg(unix)]
         if self.poller >= 0 {
             if self.wake >= 0 {
@@ -268,8 +345,19 @@ impl Reactor {
     }
 
     /// A new source group; its id (never 0).
-    pub fn src_group(&mut self, take: SrcTakeFn, flush: SrcFlushFn, data: *mut std::ffi::c_void) -> u32 {
-        let g = Group { take, flush, data, referenced: false, pending: false };
+    pub fn src_group(
+        &mut self,
+        take: SrcTakeFn,
+        flush: SrcFlushFn,
+        data: *mut std::ffi::c_void,
+    ) -> u32 {
+        let g = Group {
+            take,
+            flush,
+            data,
+            referenced: false,
+            pending: false,
+        };
         match self.groups.iter().position(Option::is_none) {
             Some(i) => {
                 self.groups[i] = Some(g);
@@ -283,14 +371,18 @@ impl Reactor {
     }
 
     fn group_mut(&mut self, g: u32) -> Option<&mut Group> {
-        self.groups.get_mut((g as usize).wrapping_sub(1)).and_then(Option::as_mut)
+        self.groups
+            .get_mut((g as usize).wrapping_sub(1))
+            .and_then(Option::as_mut)
     }
 
     /// Closes a group: its sources are forgotten (their kernel registrations stay until the fds
     /// close: events for unknown sources are ignored, and a later arm registers anew). Returns
     /// whether it was referenced.
     pub fn src_close(&mut self, g: u32) -> bool {
-        let Some(slot) = self.groups.get_mut((g as usize).wrapping_sub(1)) else { return false };
+        let Some(slot) = self.groups.get_mut((g as usize).wrapping_sub(1)) else {
+            return false;
+        };
         let Some(old) = slot.take() else { return false };
         let mut gone = 0;
         self.src.retain(|_, e| {
@@ -333,7 +425,11 @@ impl Reactor {
         for (k, p) in fds.iter().enumerate().filter(|(_, p)| p.fd >= 0) {
             if let Err(err) = self.src_watch(g, p, token) {
                 for q in fds[..k].iter().filter(|q| q.fd >= 0) {
-                    if let Some(e) = self.src.get_mut(&q.fd).filter(|e| e.token == token && e.want != 0) {
+                    if let Some(e) = self
+                        .src
+                        .get_mut(&q.fd)
+                        .filter(|e| e.token == token && e.want != 0)
+                    {
                         e.want = 0;
                         self.armed -= 1;
                     }
@@ -347,7 +443,11 @@ impl Reactor {
     /// The wait `token` over `fds` ended: its sources are no longer armed for it.
     pub fn src_disarm(&mut self, fds: &[SrcFd], token: u64) {
         for p in fds {
-            if let Some(e) = self.src.get_mut(&p.fd).filter(|e| e.token == token && e.want != 0) {
+            if let Some(e) = self
+                .src
+                .get_mut(&p.fd)
+                .filter(|e| e.token == token && e.want != 0)
+            {
                 e.want = 0;
                 self.armed -= 1;
             }
@@ -391,9 +491,15 @@ impl Reactor {
 
     /// An event `bits` of the source `fd`: offered to its armed waiter, else kept as ready bits.
     fn src_event(&mut self, fd: i64, bits: u8) {
-        let Some(e) = self.src.get_mut(&fd) else { return };
+        let Some(e) = self.src.get_mut(&fd) else {
+            return;
+        };
         if e.want != 0 && bits & (e.want | ERR) != 0 {
-            if let Some(g) = self.groups.get_mut((e.group as usize).wrapping_sub(1)).and_then(Option::as_mut) {
+            if let Some(g) = self
+                .groups
+                .get_mut((e.group as usize).wrapping_sub(1))
+                .and_then(Option::as_mut)
+            {
                 // SAFETY: the group's function, which must not call into the loop
                 if unsafe { (g.take)(g.data, e.token) } {
                     g.pending = true;
@@ -436,7 +542,13 @@ impl Reactor {
         match self.src.get_mut(&p.fd) {
             Some(e) if e.registered && (write_ok || want & WRITE == 0) => {
                 self.armed = self.armed + (want != 0) as usize - (e.want != 0) as usize;
-                *e = SrcEntry { group: g, registered: true, want, token, ..*e };
+                *e = SrcEntry {
+                    group: g,
+                    registered: true,
+                    want,
+                    token,
+                    ..*e
+                };
                 true
             }
             _ => false,
@@ -449,14 +561,22 @@ impl Reactor {
         if self.src_rearm(g, p, token, true) {
             return Ok(());
         }
+        // (a fork child re-arms on the fast path without a check: its next poll registers the
+        // source with its own poller)
+        self.check_fork();
         let registered = self.src.get(&p.fd).is_some_and(|e| e.registered);
         if !registered {
             if !self.ensure_poller() {
                 return Err(errno());
             }
-            let mut ev = libc::epoll_event { events: (libc::EPOLLIN | libc::EPOLLOUT | libc::EPOLLRDHUP | libc::EPOLLET) as u32, u64: p.fd as u64 | SRC_TAG };
+            let mut ev = libc::epoll_event {
+                events: (libc::EPOLLIN | libc::EPOLLOUT | libc::EPOLLRDHUP | libc::EPOLLET) as u32,
+                u64: p.fd as u64 | SRC_TAG,
+            };
             // SAFETY: a valid event for the fd
-            if unsafe { libc::epoll_ctl(self.poller, libc::EPOLL_CTL_ADD, p.fd as i32, &mut ev) } != 0 {
+            if unsafe { libc::epoll_ctl(self.poller, libc::EPOLL_CTL_ADD, p.fd as i32, &mut ev) }
+                != 0
+            {
                 let err = errno();
                 // registered by a closed group of this poller: still the same registration
                 if err != libc::EEXIST {
@@ -470,7 +590,13 @@ impl Reactor {
         let e = self.src.entry(p.fd).or_default();
         let want = p.events as u8 & (READ | WRITE);
         self.armed = self.armed + (want != 0) as usize - (e.want != 0) as usize;
-        *e = SrcEntry { group: g, registered: true, want, token, ..*e };
+        *e = SrcEntry {
+            group: g,
+            registered: true,
+            want,
+            token,
+            ..*e
+        };
         Ok(())
     }
 
@@ -480,13 +606,17 @@ impl Reactor {
         if self.src_rearm(g, p, token, false) {
             return Ok(());
         }
+        self.check_fork();
         let registered = self.src.get(&p.fd).is_some_and(|e| e.registered);
         let write = p.events as u8 & WRITE != 0;
         if !registered || write {
             if !self.ensure_poller() {
                 return Err(errno());
             }
-            let ch = [kev_change(p.fd, libc::EVFILT_READ, libc::EV_ADD | libc::EV_CLEAR), kev_change(p.fd, libc::EVFILT_WRITE, libc::EV_ADD | libc::EV_ONESHOT)];
+            let ch = [
+                kev_change(p.fd, libc::EVFILT_READ, libc::EV_ADD | libc::EV_CLEAR),
+                kev_change(p.fd, libc::EVFILT_WRITE, libc::EV_ADD | libc::EV_ONESHOT),
+            ];
             let changes: &[Kev] = match (registered, write) {
                 (false, true) => &ch,
                 (false, false) => &ch[..1],
@@ -502,7 +632,13 @@ impl Reactor {
         let e = self.src.entry(p.fd).or_default();
         let want = p.events as u8 & (READ | WRITE);
         self.armed = self.armed + (want != 0) as usize - (e.want != 0) as usize;
-        *e = SrcEntry { group: g, registered: true, want, token, ..*e };
+        *e = SrcEntry {
+            group: g,
+            registered: true,
+            want,
+            token,
+            ..*e
+        };
         Ok(())
     }
 
@@ -511,7 +647,13 @@ impl Reactor {
         let e = self.src.entry(p.fd).or_default();
         let want = p.events as u8 & (READ | WRITE);
         self.armed = self.armed + (want != 0) as usize - (e.want != 0) as usize;
-        *e = SrcEntry { group: g, registered: true, want, token, ..*e };
+        *e = SrcEntry {
+            group: g,
+            registered: true,
+            want,
+            token,
+            ..*e
+        };
         Ok(())
     }
 
@@ -523,7 +665,16 @@ impl Reactor {
     /// Polls for readiness for at most `timeout` seconds (None: no limit), which end at
     /// `deadline` on the loop clock when it is known; appends the ready fds to `out`; returns
     /// whether the wake pipe was signalled. EINTR returns at once, empty.
-    pub fn poll(&mut self, timeout: Option<f64>, deadline: Option<f64>, out: &mut Vec<Ready>) -> bool {
+    pub fn poll(
+        &mut self,
+        timeout: Option<f64>,
+        deadline: Option<f64>,
+        out: &mut Vec<Ready>,
+    ) -> bool {
+        // (WSAPoll has no use for the deadline)
+        #[cfg(windows)]
+        let _ = deadline;
+        self.check_fork();
         self.apply();
         let mut timeout = timeout;
         if self.n_always > 0 {
@@ -563,6 +714,86 @@ impl Reactor {
         }
     }
 
+    /// In a fork() child (first call there): the inherited poller and wait timer are left to the
+    /// parent and every registration is forgotten, so the child's watchers go to a poller of its
+    /// own at the next apply. The changes queued at the fork go with that apply: a pending
+    /// removal (registered, no longer wanted) is a removal from the map only (nothing is
+    /// registered in the child's poller), a pending addition or change registers anew. The wake
+    /// pipe is the signal watchers' (`signal::Watchers::check_fork` replaces it).
+    /// The check is inlined into its callers (`poll` above all): one relaxed load and a branch;
+    /// the rebuild is out of line.
+    #[cfg(unix)]
+    #[inline(always)]
+    fn check_fork(&mut self) {
+        let g = FORK_GEN.load(Ordering::Relaxed);
+        if g != self.fork_gen {
+            self.rebuild_after_fork(g);
+        }
+    }
+
+    #[cfg(unix)]
+    #[cold]
+    #[inline(never)]
+    fn rebuild_after_fork(&mut self, g: u64) {
+        self.fork_gen = g;
+        if self.poller >= 0 {
+            // epoll: the instance is shared with the parent, never touch it again; kqueue: the
+            // fd is not inherited at all (its number may be reused): never close it
+            #[cfg(target_os = "linux")]
+            unsafe {
+                libc::close(self.poller)
+            };
+            self.poller = -1;
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
+            {
+                self.timer_armed = None;
+            }
+        }
+        // the timerfd is shared with the parent too: arming it would move the parent's timer
+        #[cfg(target_os = "linux")]
+        if self.timer_fd >= 0 {
+            unsafe { libc::close(self.timer_fd) };
+            self.timer_fd = -1;
+        }
+        for (&fd, e) in self.fds.iter_mut() {
+            e.registered = 0;
+            e.always = false;
+            if !e.dirty {
+                e.dirty = true;
+                self.dirty.push(fd);
+            }
+        }
+        self.n_always = 0;
+        // the sources are registered anew at their next wait (an armed one now: at once)
+        let armed: Vec<SrcFd> = self
+            .src
+            .iter()
+            .filter(|(_, e)| e.want != 0)
+            .map(|(&fd, e)| SrcFd {
+                fd,
+                events: e.want as u32,
+            })
+            .collect();
+        for e in self.src.values_mut() {
+            e.registered = false;
+        }
+        for p in armed {
+            let (g, token) = self
+                .src
+                .get(&p.fd)
+                .map(|e| (e.group, e.token))
+                .unwrap_or_default();
+            if self.src_watch(g, &p, token).is_err() {
+                // report it to its waiter, which finds out what is wrong when it retries
+                self.src_event(p.fd, READ | WRITE | ERR);
+            }
+        }
+    }
+
+    #[cfg(windows)]
+    #[inline(always)]
+    fn check_fork(&mut self) {}
+
     /// Brings the poller's interest in line with the watchers.
     fn apply(&mut self) {
         if self.dirty.is_empty() {
@@ -571,7 +802,9 @@ impl Reactor {
         // (its buffer comes back below: no allocation per poll)
         let mut dirty = std::mem::take(&mut self.dirty);
         for &fd in &dirty {
-            let Some(e) = self.fds.get_mut(&fd) else { continue };
+            let Some(e) = self.fds.get_mut(&fd) else {
+                continue;
+            };
             e.dirty = false;
             let want = e.want();
             if want == 0 {
@@ -649,7 +882,10 @@ impl Reactor {
         if !self.ensure_poller() {
             return false;
         }
-        let mut ev = libc::epoll_event { events: 0, u64: fd as u64 };
+        let mut ev = libc::epoll_event {
+            events: 0,
+            u64: fd as u64,
+        };
         if want & READ != 0 {
             ev.events |= libc::EPOLLIN as u32;
         }
@@ -662,7 +898,11 @@ impl Reactor {
                 libc::epoll_ctl(self.poller, libc::EPOLL_CTL_DEL, fd, &mut ev);
                 return true;
             }
-            let op = if had == 0 { libc::EPOLL_CTL_ADD } else { libc::EPOLL_CTL_MOD };
+            let op = if had == 0 {
+                libc::EPOLL_CTL_ADD
+            } else {
+                libc::EPOLL_CTL_MOD
+            };
             if libc::epoll_ctl(self.poller, op, fd, &mut ev) == 0 {
                 return true;
             }
@@ -687,7 +927,15 @@ impl Reactor {
         for (bit, filter) in [(READ, libc::EVFILT_READ), (WRITE, libc::EVFILT_WRITE)] {
             // a fresh registration (had 0) also drops a filter left from a reused fd number
             if (had ^ want) & bit != 0 || (had == 0 && want & bit == 0) {
-                changes[n] = kev_change(fd, filter, (if want & bit != 0 { libc::EV_ADD } else { libc::EV_DELETE }) | libc::EV_RECEIPT);
+                changes[n] = kev_change(
+                    fd,
+                    filter,
+                    (if want & bit != 0 {
+                        libc::EV_ADD
+                    } else {
+                        libc::EV_DELETE
+                    }) | libc::EV_RECEIPT,
+                );
                 n += 1;
             }
         }
@@ -705,7 +953,8 @@ impl Reactor {
                 if ev.flags & libc::EV_DELETE != 0 || want == 0 {
                     continue;
                 }
-                let added = ev.filter == libc::EVFILT_READ && want & READ != 0 || ev.filter == libc::EVFILT_WRITE && want & WRITE != 0;
+                let added = ev.filter == libc::EVFILT_READ && want & READ != 0
+                    || ev.filter == libc::EVFILT_WRITE && want & WRITE != 0;
                 if added {
                     return false;
                 }
@@ -719,9 +968,19 @@ impl Reactor {
     #[cfg(target_os = "linux")]
     fn arm_timer(&mut self, at: f64) -> bool {
         if self.timer_fd == -1 {
-            let fd = unsafe { libc::timerfd_create(libc::CLOCK_MONOTONIC, libc::TFD_CLOEXEC | libc::TFD_NONBLOCK) };
-            let mut ev = libc::epoll_event { events: libc::EPOLLIN as u32, u64: fd as u64 };
-            if fd >= 0 && unsafe { libc::epoll_ctl(self.poller, libc::EPOLL_CTL_ADD, fd, &mut ev) } == 0 {
+            let fd = unsafe {
+                libc::timerfd_create(
+                    libc::CLOCK_MONOTONIC,
+                    libc::TFD_CLOEXEC | libc::TFD_NONBLOCK,
+                )
+            };
+            let mut ev = libc::epoll_event {
+                events: libc::EPOLLIN as u32,
+                u64: fd as u64,
+            };
+            if fd >= 0
+                && unsafe { libc::epoll_ctl(self.poller, libc::EPOLL_CTL_ADD, fd, &mut ev) } == 0
+            {
                 self.timer_fd = fd;
             } else {
                 if fd >= 0 {
@@ -738,13 +997,31 @@ impl Reactor {
         }
         // rounded up: an early wake-up would spin until the timer is due
         let ns = (at.fract() * 1e9).ceil();
-        let (sec, ns) = if ns >= 1e9 { (at.trunc() + 1.0, 0.0) } else { (at.trunc(), ns) };
-        let spec = libc::itimerspec {
-            it_interval: libc::timespec { tv_sec: 0, tv_nsec: 0 },
-            // at least 1 ns: zero disarms
-            it_value: libc::timespec { tv_sec: sec.min(i64::MAX as f64) as libc::time_t, tv_nsec: if sec <= 0.0 { ns.max(1.0) } else { ns } as libc::c_long },
+        let (sec, ns) = if ns >= 1e9 {
+            (at.trunc() + 1.0, 0.0)
+        } else {
+            (at.trunc(), ns)
         };
-        if unsafe { libc::timerfd_settime(self.timer_fd, libc::TFD_TIMER_ABSTIME, &spec, std::ptr::null_mut()) } != 0 {
+        let spec = libc::itimerspec {
+            it_interval: libc::timespec {
+                tv_sec: 0,
+                tv_nsec: 0,
+            },
+            // at least 1 ns: zero disarms
+            it_value: libc::timespec {
+                tv_sec: sec.min(i64::MAX as f64) as libc::time_t,
+                tv_nsec: if sec <= 0.0 { ns.max(1.0) } else { ns } as libc::c_long,
+            },
+        };
+        if unsafe {
+            libc::timerfd_settime(
+                self.timer_fd,
+                libc::TFD_TIMER_ABSTIME,
+                &spec,
+                std::ptr::null_mut(),
+            )
+        } != 0
+        {
             return false;
         }
         self.timer_armed = Some(at);
@@ -752,10 +1029,17 @@ impl Reactor {
     }
 
     #[cfg(target_os = "linux")]
-    fn poll_os(&mut self, timeout: Option<f64>, deadline: Option<f64>, out: &mut Vec<Ready>, woke: &mut bool) {
+    fn poll_os(
+        &mut self,
+        timeout: Option<f64>,
+        deadline: Option<f64>,
+        out: &mut Vec<Ready>,
+        woke: &mut bool,
+    ) {
         let n = self.fds.len() + self.src.len() + 2;
         if self.events.len() < n.min(1024) {
-            self.events.resize(n.min(1024), libc::epoll_event { events: 0, u64: 0 });
+            self.events
+                .resize(n.min(1024), libc::epoll_event { events: 0, u64: 0 });
         }
         let ms = match timeout {
             None => {
@@ -772,7 +1056,14 @@ impl Reactor {
             // whole milliseconds, rounded up (an early wake-up would spin until the timer is due)
             Some(t) => (t * 1000.0).ceil().min(i32::MAX as f64) as i32,
         };
-        let r = unsafe { libc::epoll_wait(self.poller, self.events.as_mut_ptr(), self.events.len() as i32, ms) };
+        let r = unsafe {
+            libc::epoll_wait(
+                self.poller,
+                self.events.as_mut_ptr(),
+                self.events.len() as i32,
+                ms,
+            )
+        };
         if r <= 0 {
             return;
         }
@@ -813,14 +1104,23 @@ impl Reactor {
 
     #[cfg(all(unix, not(target_os = "linux")))]
     #[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
-    fn poll_os(&mut self, timeout: Option<f64>, deadline: Option<f64>, out: &mut Vec<Ready>, woke: &mut bool) {
+    fn poll_os(
+        &mut self,
+        timeout: Option<f64>,
+        deadline: Option<f64>,
+        out: &mut Vec<Ready>,
+        woke: &mut bool,
+    ) {
         let n = (2 * (self.fds.len() + self.src.len()) + 2).min(1024);
         if self.events.len() < n {
             self.events.resize(n, kev_change(0, 0, 0));
         }
         let ts = timeout.map(|t| {
             let t = t.max(0.0);
-            libc::timespec { tv_sec: t.trunc() as libc::time_t, tv_nsec: (t.fract() * 1e9) as libc::c_long }
+            libc::timespec {
+                tv_sec: t.trunc() as libc::time_t,
+                tv_nsec: (t.fract() * 1e9) as libc::c_long,
+            }
         });
         #[cfg_attr(not(target_os = "macos"), allow(unused_mut))]
         let mut wait = ts.as_ref();
@@ -836,7 +1136,11 @@ impl Reactor {
                 wait = None;
                 let at = deadline.unwrap_or(f64::NAN);
                 if self.timer_armed != Some(at) {
-                    let mut k = kev_change(WAIT_TIMER as i64, libc::EVFILT_TIMER, libc::EV_ADD | libc::EV_ONESHOT);
+                    let mut k = kev_change(
+                        WAIT_TIMER as i64,
+                        libc::EVFILT_TIMER,
+                        libc::EV_ADD | libc::EV_ONESHOT,
+                    );
                     k.fflags = libc::NOTE_NSECONDS | libc::NOTE_CRITICAL;
                     k.data = (t * 1e9).ceil().min(i64::MAX as f64) as _;
                     timer = [k];
@@ -847,7 +1151,11 @@ impl Reactor {
             None if self.timer_armed.is_some() => {
                 // a stale timer would end a wait without timeout early (ENOENT if it
                 // fired: ignored); a non-blocking poll leaves it armed (it ends no wait)
-                timer = [kev_change(WAIT_TIMER as i64, libc::EVFILT_TIMER, libc::EV_DELETE)];
+                timer = [kev_change(
+                    WAIT_TIMER as i64,
+                    libc::EVFILT_TIMER,
+                    libc::EV_DELETE,
+                )];
                 change = &timer;
                 self.timer_armed = None;
             }
@@ -870,8 +1178,14 @@ impl Reactor {
                 *woke = true;
                 continue;
             }
-            if self.src.contains_key(&fd) && (ev.filter == libc::EVFILT_READ || ev.filter == libc::EVFILT_WRITE) {
-                let mut bits = if ev.filter == libc::EVFILT_READ { READ } else { WRITE };
+            if self.src.contains_key(&fd)
+                && (ev.filter == libc::EVFILT_READ || ev.filter == libc::EVFILT_WRITE)
+            {
+                let mut bits = if ev.filter == libc::EVFILT_READ {
+                    READ
+                } else {
+                    WRITE
+                };
                 if ev.flags & (libc::EV_EOF | libc::EV_ERROR) != 0 {
                     bits |= ERR;
                 }
@@ -895,7 +1209,9 @@ impl Reactor {
 
     #[cfg(windows)]
     fn poll_windows(&mut self, timeout: Option<f64>, out: &mut Vec<Ready>) -> bool {
-        use windows_sys::Win32::Networking::WinSock::{WSAPoll, POLLERR, POLLHUP, POLLRDNORM, POLLWRNORM, WSAPOLLFD};
+        use windows_sys::Win32::Networking::WinSock::{
+            WSAPoll, POLLERR, POLLHUP, POLLRDNORM, POLLWRNORM, WSAPOLLFD,
+        };
         let mut pfds: Vec<WSAPOLLFD> = Vec::new();
         let mut others = false;
         for (&fd, e) in self.fds.iter() {
@@ -913,12 +1229,16 @@ impl Reactor {
             }
             let mut ev = 0i16;
             if w & READ != 0 {
-                ev |= POLLRDNORM as i16;
+                ev |= POLLRDNORM;
             }
             if w & WRITE != 0 {
-                ev |= POLLWRNORM as i16;
+                ev |= POLLWRNORM;
             }
-            pfds.push(WSAPOLLFD { fd: fd as usize, events: ev, revents: 0 });
+            pfds.push(WSAPOLLFD {
+                fd: fd as usize,
+                events: ev,
+                revents: 0,
+            });
         }
         // the armed sources (sockets), after the watchers' fds
         let n_fds = pfds.len();
@@ -928,12 +1248,16 @@ impl Reactor {
             }
             let mut ev = 0i16;
             if e.want & READ != 0 {
-                ev |= POLLRDNORM as i16;
+                ev |= POLLRDNORM;
             }
             if e.want & WRITE != 0 {
-                ev |= POLLWRNORM as i16;
+                ev |= POLLWRNORM;
             }
-            pfds.push(WSAPOLLFD { fd: fd as usize, events: ev, revents: 0 });
+            pfds.push(WSAPOLLFD {
+                fd: fd as usize,
+                events: ev,
+                revents: 0,
+            });
         }
         let mut timeout = timeout;
         if !out.is_empty() {
@@ -949,7 +1273,11 @@ impl Reactor {
         };
         if pfds.is_empty() {
             if ms != 0 {
-                sleep(if ms < 0 { None } else { Some(ms as f64 / 1000.0) });
+                sleep(if ms < 0 {
+                    None
+                } else {
+                    Some(ms as f64 / 1000.0)
+                });
             }
             return false;
         }
@@ -961,10 +1289,15 @@ impl Reactor {
             if p.revents == 0 {
                 continue;
             }
-            let err = p.revents & (POLLERR | POLLHUP) as i16 != 0;
-            let (rd, wr) = (err || p.revents & POLLRDNORM as i16 != 0, err || p.revents & POLLWRNORM as i16 != 0);
+            let err = p.revents & (POLLERR | POLLHUP) != 0;
+            let (rd, wr) = (
+                err || p.revents & POLLRDNORM != 0,
+                err || p.revents & POLLWRNORM != 0,
+            );
             if i >= n_fds {
-                let bits = (if rd { READ } else { 0 }) | (if wr { WRITE } else { 0 }) | (if err { ERR } else { 0 });
+                let bits = (if rd { READ } else { 0 })
+                    | (if wr { WRITE } else { 0 })
+                    | (if err { ERR } else { 0 });
                 self.src_event(p.fd as i64, bits);
                 continue;
             }
@@ -977,7 +1310,7 @@ impl Reactor {
 impl Drop for Reactor {
     fn drop(&mut self) {
         #[cfg(unix)]
-        if self.poller >= 0 {
+        if self.poller >= 0 && self.fork_gen == FORK_GEN.load(Ordering::Relaxed) {
             unsafe { libc::close(self.poller) };
         }
         #[cfg(target_os = "linux")]
@@ -990,7 +1323,9 @@ impl Drop for Reactor {
 /// The last OS error number.
 #[cfg(unix)]
 fn errno() -> i32 {
-    std::io::Error::last_os_error().raw_os_error().unwrap_or(libc::EIO)
+    std::io::Error::last_os_error()
+        .raw_os_error()
+        .unwrap_or(libc::EIO)
 }
 
 /// Sleeps (no fd to wait for): usleep() as Revolt's stream_select driver does; returns early on
@@ -1001,18 +1336,25 @@ fn sleep(timeout: Option<f64>) {
         #[cfg(unix)]
         t => unsafe {
             let t = t.unwrap_or(1e9).min(1e9);
-            let ts = libc::timespec { tv_sec: t.trunc() as libc::time_t, tv_nsec: (t.fract() * 1e9) as libc::c_long };
+            let ts = libc::timespec {
+                tv_sec: t.trunc() as libc::time_t,
+                tv_nsec: (t.fract() * 1e9) as libc::c_long,
+            };
             libc::nanosleep(&ts, std::ptr::null_mut());
         },
         #[cfg(windows)]
-        t => std::thread::sleep(std::time::Duration::from_secs_f64(t.unwrap_or(1e9).min(1e9))),
+        t => std::thread::sleep(std::time::Duration::from_secs_f64(
+            t.unwrap_or(1e9).min(1e9),
+        )),
     }
 }
 
 #[cfg(windows)]
 mod win {
     use windows_sys::Win32::Foundation::{HANDLE, INVALID_HANDLE_VALUE, WAIT_OBJECT_0};
-    use windows_sys::Win32::Storage::FileSystem::{GetFileType, FILE_TYPE_CHAR, FILE_TYPE_DISK, FILE_TYPE_PIPE};
+    use windows_sys::Win32::Storage::FileSystem::{
+        GetFileType, FILE_TYPE_CHAR, FILE_TYPE_DISK, FILE_TYPE_PIPE,
+    };
     use windows_sys::Win32::System::Pipes::PeekNamedPipe;
     use windows_sys::Win32::System::Threading::WaitForSingleObject;
 
@@ -1032,7 +1374,16 @@ mod win {
             && match unsafe { GetFileType(h) } {
                 FILE_TYPE_PIPE => {
                     let mut avail = 0u32;
-                    let ok = unsafe { PeekNamedPipe(h, std::ptr::null_mut(), 0, std::ptr::null_mut(), &mut avail, std::ptr::null_mut()) };
+                    let ok = unsafe {
+                        PeekNamedPipe(
+                            h,
+                            std::ptr::null_mut(),
+                            0,
+                            std::ptr::null_mut(),
+                            &mut avail,
+                            std::ptr::null_mut(),
+                        )
+                    };
                     ok == 0 || avail > 0
                 }
                 FILE_TYPE_DISK => true,
