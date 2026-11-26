@@ -84,6 +84,7 @@ struct SrcEntry {
     /// the group (1-based) of the waiter / of the last arm
     group: u32,
     /// registered with the poller (Unix)
+    #[cfg_attr(windows, allow(dead_code))]
     registered: bool,
     /// readiness seen while nobody waited for it (READ, WRITE, ERR)
     ready: u8,
@@ -670,6 +671,9 @@ impl Reactor {
         deadline: Option<f64>,
         out: &mut Vec<Ready>,
     ) -> bool {
+        // (WSAPoll has no use for the deadline)
+        #[cfg(windows)]
+        let _ = deadline;
         self.check_fork();
         self.apply();
         let mut timeout = timeout;
@@ -1225,10 +1229,10 @@ impl Reactor {
             }
             let mut ev = 0i16;
             if w & READ != 0 {
-                ev |= POLLRDNORM as i16;
+                ev |= POLLRDNORM;
             }
             if w & WRITE != 0 {
-                ev |= POLLWRNORM as i16;
+                ev |= POLLWRNORM;
             }
             pfds.push(WSAPOLLFD {
                 fd: fd as usize,
@@ -1244,10 +1248,10 @@ impl Reactor {
             }
             let mut ev = 0i16;
             if e.want & READ != 0 {
-                ev |= POLLRDNORM as i16;
+                ev |= POLLRDNORM;
             }
             if e.want & WRITE != 0 {
-                ev |= POLLWRNORM as i16;
+                ev |= POLLWRNORM;
             }
             pfds.push(WSAPOLLFD {
                 fd: fd as usize,
@@ -1285,10 +1289,10 @@ impl Reactor {
             if p.revents == 0 {
                 continue;
             }
-            let err = p.revents & (POLLERR | POLLHUP) as i16 != 0;
+            let err = p.revents & (POLLERR | POLLHUP) != 0;
             let (rd, wr) = (
-                err || p.revents & POLLRDNORM as i16 != 0,
-                err || p.revents & POLLWRNORM as i16 != 0,
+                err || p.revents & POLLRDNORM != 0,
+                err || p.revents & POLLWRNORM != 0,
             );
             if i >= n_fds {
                 let bits = (if rd { READ } else { 0 })
