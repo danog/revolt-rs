@@ -74,14 +74,25 @@ pub unsafe fn mshutdown() {}
 /// phpinfo() rows.
 pub unsafe fn minfo() {
     sys::php_info_print_table_start();
-    zend::php_info_print_table_header(2, c"revolt-rs (native revolt/event-loop)".as_ptr(), c"enabled".as_ptr());
+    zend::php_info_print_table_header(
+        2,
+        c"revolt-rs (native revolt/event-loop)".as_ptr(),
+        c"enabled".as_ptr(),
+    );
     let row = |k: &std::ffi::CStr, v: &str| {
         let v = std::ffi::CString::new(v).unwrap();
         zend::php_info_print_table_row(2, k.as_ptr(), v.as_ptr());
     };
     row(c"revolt-rs version", VERSION);
     row(c"revolt/event-loop API", REVOLT_VERSION);
-    row(c"Classes registered by", if is_owner() { "this module" } else { "another module (revolt-rs copy)" });
+    row(
+        c"Classes registered by",
+        if is_owner() {
+            "this module"
+        } else {
+            "another module (revolt-rs copy)"
+        },
+    );
     #[cfg(target_os = "linux")]
     row(c"Reactor", "epoll");
     #[cfg(all(unix, not(target_os = "linux")))]

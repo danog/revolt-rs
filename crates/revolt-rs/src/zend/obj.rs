@@ -38,7 +38,8 @@ pub unsafe fn freed(o: *mut sys::zend_object) -> bool {
 /// that refuses (native state cannot be duplicated safely; the class stays "cloneable" for
 /// Reflection, as the PHP classes are).
 pub unsafe fn handlers<T: State>() -> *mut sys::zend_object_handlers {
-    let mut h: sys::zend_object_handlers = std::ptr::read(std::ptr::addr_of!(sys::std_object_handlers));
+    let mut h: sys::zend_object_handlers =
+        std::ptr::read(std::ptr::addr_of!(sys::std_object_handlers));
     // c_int before 8.6, size_t since (php-src 777a79cac9d)
     h.offset = std::mem::offset_of!(Native<T>, std) as _;
     h.free_obj = Some(free::<T>);
@@ -48,7 +49,10 @@ pub unsafe fn handlers<T: State>() -> *mut sys::zend_object_handlers {
 }
 
 /// create_object for `T`'s classes (and the PHP classes extending them).
-pub unsafe fn create<T: State>(ce: *mut sys::zend_class_entry, handlers: *const sys::zend_object_handlers) -> *mut sys::zend_object {
+pub unsafe fn create<T: State>(
+    ce: *mut sys::zend_class_entry,
+    handlers: *const sys::zend_object_handlers,
+) -> *mut sys::zend_object {
     let size = std::mem::size_of::<Native<T>>();
     let p = sys::ext_php_rs_zend_object_alloc(size, ce) as *mut Native<T>;
     std::ptr::write(std::ptr::addr_of_mut!((*p).state), T::new(ce));
@@ -64,7 +68,11 @@ unsafe extern "C" fn free<T: State>(o: *mut sys::zend_object) {
     sys::zend_object_std_dtor(o);
 }
 
-unsafe extern "C" fn get_gc<T: State>(o: *mut sys::zend_object, table: *mut *mut sys::zval, n: *mut c_int) -> *mut sys::HashTable {
+unsafe extern "C" fn get_gc<T: State>(
+    o: *mut sys::zend_object,
+    table: *mut *mut sys::zval,
+    n: *mut c_int,
+) -> *mut sys::HashTable {
     let buf = sys::zend_get_gc_buffer_create();
     let mut add = |z: *mut sys::zval| {
         if zval::is_refcounted(z) {
@@ -93,7 +101,11 @@ unsafe extern "C" fn get_gc<T: State>(o: *mut sys::zend_object, table: *mut *mut
 
 unsafe extern "C" fn no_clone<T: State>(o: *mut sys::zend_object) -> *mut sys::zend_object {
     let ce = (*o).ce;
-    sys::zend_throw_error(null_mut(), c"Trying to clone an uncloneable object of class %s".as_ptr(), (*(*ce).name).val.as_ptr());
+    sys::zend_throw_error(
+        null_mut(),
+        c"Trying to clone an uncloneable object of class %s".as_ptr(),
+        (*(*ce).name).val.as_ptr(),
+    );
     // the VM releases the result of a failed clone: it must be an object
     create::<T>(ce, (*o).handlers)
 }

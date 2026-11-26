@@ -55,7 +55,12 @@ impl Heap {
         }
         debug_assert!(self.pos[s] == NONE);
         self.seq += 1;
-        let e = Entry { exp, seq: self.seq, id: c.id, slot: c.slot };
+        let e = Entry {
+            exp,
+            seq: self.seq,
+            id: c.id,
+            slot: c.slot,
+        };
         self.v.push(e);
         self.up(e, self.v.len() - 1);
     }
@@ -71,7 +76,10 @@ impl Heap {
             return None;
         }
         self.remove_at(0);
-        Some(Cid { id: e.id, slot: e.slot })
+        Some(Cid {
+            id: e.id,
+            slot: e.slot,
+        })
     }
 
     /// Removes the record in `slot` if it is in the heap.

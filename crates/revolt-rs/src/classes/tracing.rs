@@ -54,17 +54,51 @@ pub unsafe fn register(ces: &mut Ces) {
     HANDLERS = obj::handlers::<TracingState>();
     let mut ms = super::driver_method_list(PUB, &|n| handler(n));
     ms.extend(vec![
-        m("__construct", zh!(construct), PUB, NONE, vec![a("driver", T_DRV)]),
+        m(
+            "__construct",
+            zh!(construct),
+            PUB,
+            NONE,
+            vec![a("driver", T_DRV)],
+        ),
         m("dump", zh!(dump), PUB, T_S, vec![]),
-        m("getCreationTrace", zh!(get_creation_trace), PRI, T_S, vec![a("callbackId", T_S)]),
-        m("getCancelTrace", zh!(get_cancel_trace), PRI, T_S, vec![a("callbackId", T_S)]),
-        m("formatStacktrace", zh!(format_stacktrace), PRI, T_S, vec![a("trace", T_A)]),
+        m(
+            "getCreationTrace",
+            zh!(get_creation_trace),
+            PRI,
+            T_S,
+            vec![a("callbackId", T_S)],
+        ),
+        m(
+            "getCancelTrace",
+            zh!(get_cancel_trace),
+            PRI,
+            T_S,
+            vec![a("callbackId", T_S)],
+        ),
+        m(
+            "formatStacktrace",
+            zh!(format_stacktrace),
+            PRI,
+            T_S,
+            vec![a("trace", T_A)],
+        ),
     ]);
-    let cls = k::register_class("Revolt\\EventLoop\\Driver\\TracingDriver", ms, null_mut(), k::FINAL | k::NOT_SERIALIZABLE);
+    let cls = k::register_class(
+        "Revolt\\EventLoop\\Driver\\TracingDriver",
+        ms,
+        null_mut(),
+        k::FINAL | k::NOT_SERIALIZABLE,
+    );
     k::implements(cls, ces.driver);
     (*cls).__bindgen_anon_2.create_object = Some(create_object);
     k::prop(cls, "driver", T_DRV, k::PRIVATE | k::READONLY, Dv::Undef);
-    for n in ["enabledCallbacks", "unreferencedCallbacks", "creationTraces", "cancelTraces"] {
+    for n in [
+        "enabledCallbacks",
+        "unreferencedCallbacks",
+        "creationTraces",
+        "cancelTraces",
+    ] {
         k::prop(cls, n, T_A, k::PRIVATE, Dv::EmptyArray);
     }
     WRAPPER_FN = fiber::internal_function("{closure}", zh!(wrapper), cls);
@@ -114,7 +148,9 @@ unsafe fn inner(ex: Ex, lc: &[u8], args: &mut [zval::Z]) -> Zv {
 }
 
 unsafe fn frame_args(ex: Ex) -> Vec<zval::Z> {
-    (0..call::num_args(ex) as usize).map(|i| zval::copy_deref(call::arg(ex, i))).collect()
+    (0..call::num_args(ex) as usize)
+        .map(|i| zval::copy_deref(call::arg(ex, i)))
+        .collect()
 }
 
 unsafe fn drop_args(mut v: Vec<zval::Z>) {
@@ -231,7 +267,12 @@ unsafe extern "C" fn wrapper(ex: Ex, rv: *mut sys::zval) {
 }
 
 /// enable()/reference(): InvalidCallbackError gets the traces added.
-unsafe fn with_info(ex: Ex, rv: *mut sys::zval, lc: &[u8], on_ok: impl FnOnce(&mut TracingState, *mut sys::zend_string)) {
+unsafe fn with_info(
+    ex: Ex,
+    rv: *mut sys::zval,
+    lc: &[u8],
+    on_ok: impl FnOnce(&mut TracingState, *mut sys::zend_string),
+) {
     let mut s: *mut sys::zend_string = null_mut();
     if !zpp!(ex, "S", &mut s) {
         return;
@@ -264,7 +305,10 @@ unsafe fn traces(o: *mut sys::zend_object, id: *mut sys::zend_string) -> (Vec<u8
             zstr::bytes((*v).value.str_).to_vec()
         }
     };
-    (get(&s.creation, b"No creation trace, yet."), get(&s.cancel, b"No cancellation trace, yet."))
+    (
+        get(&s.creation, b"No creation trace, yet."),
+        get(&s.cancel, b"No cancellation trace, yet."),
+    )
 }
 
 unsafe extern "C" fn enable(ex: Ex, rv: *mut sys::zval) {
@@ -337,7 +381,11 @@ unsafe extern "C" fn unreference(ex: Ex, rv: *mut sys::zval) {
     if call::has_exception() {
         return;
     }
-    hash::set_zstr(arr(&mut st(call::this(ex)).unreferenced), s, zval::bool(true));
+    hash::set_zstr(
+        arr(&mut st(call::this(ex)).unreferenced),
+        s,
+        zval::bool(true),
+    );
     zval::write(rv, zval::str_ref(s));
 }
 
@@ -348,7 +396,9 @@ unsafe extern "C" fn construct(ex: Ex, _rv: *mut sys::zval) {
     }
     let s = st(call::this(ex));
     if !zval::is_undef(&s.driver.0) {
-        call::throw_error("Cannot modify readonly property Revolt\\EventLoop\\Driver\\TracingDriver::$driver");
+        call::throw_error(
+            "Cannot modify readonly property Revolt\\EventLoop\\Driver\\TracingDriver::$driver",
+        );
         return;
     }
     s.driver.set(zval::copy(z));
@@ -378,7 +428,10 @@ unsafe extern "C" fn dump(ex: Ex, rv: *mut sys::zval) {
         out.extend(traces(o, id).0);
         out.extend_from_slice(b"\r\n\r\n");
     }
-    while out.last().is_some_and(|c| c.is_ascii_whitespace() || *c == 0 || *c == 0x0b) {
+    while out
+        .last()
+        .is_some_and(|c| c.is_ascii_whitespace() || *c == 0 || *c == 0x0b)
+    {
         out.pop();
     }
     zval::write(rv, zval::string(&out));

@@ -64,7 +64,9 @@ mod imp {
             libc::sigfillset(&mut sa.sa_mask);
             let mut old: libc::sigaction = std::mem::zeroed();
             if libc::sigaction(sig, &sa, &mut old) != 0 {
-                return Err(std::io::Error::last_os_error().raw_os_error().unwrap_or(libc::EINVAL));
+                return Err(std::io::Error::last_os_error()
+                    .raw_os_error()
+                    .unwrap_or(libc::EINVAL));
             }
             t[sig as usize] = Some(Installed { refs: 1, old });
         }
@@ -73,7 +75,9 @@ mod imp {
 
     fn uninstall(sig: i32) {
         let mut t = INSTALLED.lock().unwrap();
-        let Some(slot) = t.get_mut(sig as usize) else { return };
+        let Some(slot) = t.get_mut(sig as usize) else {
+            return;
+        };
         let Some(i) = slot else { return };
         i.refs -= 1;
         if i.refs == 0 {
@@ -97,18 +101,22 @@ mod imp {
     impl Watchers {
         /// Watches `sig` for callback `id`; Err((errno, message)) when it cannot be.
         pub fn add(&mut self, sig: i32, id: crate::core::Cid) -> Result<(), (i32, String)> {
-            self.ensure_pipe().map_err(|e| (e, std::io::Error::from_raw_os_error(e).to_string()))?;
+            self.ensure_pipe()
+                .map_err(|e| (e, std::io::Error::from_raw_os_error(e).to_string()))?;
             if !self.by_signal.contains_key(&sig) {
                 install(sig).map_err(|e| (e, std::io::Error::from_raw_os_error(e).to_string()))?;
                 let at = self.seen.partition_point(|&(s, _)| s < sig);
-                self.seen.insert(at, (sig, COUNTERS[sig as usize].load(Ordering::SeqCst)));
+                self.seen
+                    .insert(at, (sig, COUNTERS[sig as usize].load(Ordering::SeqCst)));
             }
             self.by_signal.entry(sig).or_default().push(id);
             Ok(())
         }
 
         pub fn remove(&mut self, sig: i32, id: u64) {
-            let Some(v) = self.by_signal.get_mut(&sig) else { return };
+            let Some(v) = self.by_signal.get_mut(&sig) else {
+                return;
+            };
             if let Some(p) = v.iter().position(|x| x.id == id) {
                 v.remove(p);
             }
@@ -180,14 +188,23 @@ mod imp {
             let mut fds = [0i32; 2];
             unsafe {
                 if libc::pipe(fds.as_mut_ptr()) != 0 {
-                    return Err(std::io::Error::last_os_error().raw_os_error().unwrap_or(libc::EMFILE));
+                    return Err(std::io::Error::last_os_error()
+                        .raw_os_error()
+                        .unwrap_or(libc::EMFILE));
                 }
                 for fd in fds {
-                    libc::fcntl(fd, libc::F_SETFL, libc::fcntl(fd, libc::F_GETFL) | libc::O_NONBLOCK);
+                    libc::fcntl(
+                        fd,
+                        libc::F_SETFL,
+                        libc::fcntl(fd, libc::F_GETFL) | libc::O_NONBLOCK,
+                    );
                     libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC);
                 }
             }
-            let slot = WAKE.iter().position(|w| w.compare_exchange(-1, fds[1], Ordering::SeqCst, Ordering::SeqCst).is_ok());
+            let slot = WAKE.iter().position(|w| {
+                w.compare_exchange(-1, fds[1], Ordering::SeqCst, Ordering::SeqCst)
+                    .is_ok()
+            });
             if slot.is_none() {
                 unsafe {
                     libc::close(fds[0]);

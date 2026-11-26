@@ -38,6 +38,10 @@ static ENTRY: OnceLock<Entry> = OnceLock::new();
 /// The module entry PHP looks up when it loads the extension.
 #[no_mangle]
 pub extern "C" fn get_module() -> *mut sys::zend_module_entry {
-    let e = ENTRY.get_or_init(|| Entry(module::module_entry(c"revolt", c"0.2.0", minit, mshutdown, rinit, rshutdown, minfo)));
+    let e = ENTRY.get_or_init(|| {
+        Entry(module::module_entry(
+            c"revolt", c"0.2.0", minit, mshutdown, rinit, rshutdown, minfo,
+        ))
+    });
     &e.0 as *const sys::zend_module_entry as *mut sys::zend_module_entry
 }

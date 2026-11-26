@@ -75,7 +75,10 @@ impl IdBuf {
 /// [`id_to_string`] on the stack.
 #[inline]
 pub fn id_bytes(mut n: u64) -> IdBuf {
-    let mut b = IdBuf { buf: [0; 14], start: 14 };
+    let mut b = IdBuf {
+        buf: [0; 14],
+        start: 14,
+    };
     while n > 0 {
         n -= 1;
         b.start -= 1;
@@ -116,17 +119,30 @@ pub type NativeFn = unsafe extern "C" fn(data: *mut c_void, id: u64);
 pub type ReleaseFn = unsafe extern "C" fn(data: *mut c_void);
 
 pub enum Cb {
-    Php { closure: Zv, callee: Callee },
+    Php {
+        closure: Zv,
+        callee: Callee,
+    },
     /// `held`: an object the callback keeps alive (one reference), reported to the cycle
     /// collector (e.g. the suspension the callback resumes); released after `release`
-    Native { f: NativeFn, data: *mut c_void, release: Option<ReleaseFn>, held: Zv },
+    Native {
+        f: NativeFn,
+        data: *mut c_void,
+        release: Option<ReleaseFn>,
+        held: Zv,
+    },
     /// moved out for an invocation (a fired defer/delay)
     Taken,
 }
 
 impl Drop for Cb {
     fn drop(&mut self) {
-        if let Cb::Native { data, release: Some(r), .. } = *self {
+        if let Cb::Native {
+            data,
+            release: Some(r),
+            ..
+        } = *self
+        {
             unsafe { r(data) };
         }
     }
@@ -172,7 +188,10 @@ const _: () = assert!(size_of::<Option<Record>>() <= 128);
 pub enum Watch {
     Defer,
     /// Delay, Repeat
-    Timer { interval: f64, expiration: f64 },
+    Timer {
+        interval: f64,
+        expiration: f64,
+    },
     /// Readable, Writable
     Stream {
         /// StreamCallback::$stream (null: a raw OS handle of the embedding API)
@@ -188,7 +207,10 @@ pub enum Watch {
 impl Record {
     #[inline(always)]
     pub fn cid(&self) -> Cid {
-        Cid { id: self.id, slot: self.slot }
+        Cid {
+            id: self.id,
+            slot: self.slot,
+        }
     }
 
     /// The id's string (borrowed: owned by the record).
@@ -297,7 +319,11 @@ impl Records {
     /// The record of `c` if it still exists (no lookup).
     #[inline(always)]
     pub fn at_id(&mut self, c: Cid) -> Option<&mut Record> {
-        match self.chunks.get_mut(c.slot as usize / CHUNK).map(|ch| &mut ch[c.slot as usize % CHUNK]) {
+        match self
+            .chunks
+            .get_mut(c.slot as usize / CHUNK)
+            .map(|ch| &mut ch[c.slot as usize % CHUNK])
+        {
             Some(Some(r)) if r.id == c.id => Some(r),
             _ => None,
         }
@@ -319,7 +345,9 @@ impl Records {
         self.live[slot as usize / CHUNK] -= 1;
         let r = self.slot(slot).take();
         let free = self.free.len();
-        if free > KEEP && (self.map.is_empty() || (free > self.compact_at && free > 4 * self.map.len())) {
+        if free > KEEP
+            && (self.map.is_empty() || (free > self.compact_at && free > 4 * self.map.len()))
+        {
             self.compact();
         }
         r
@@ -346,11 +374,21 @@ impl Records {
     }
 
     pub fn values(&self) -> impl Iterator<Item = &Record> {
-        self.chunks.iter().zip(&self.live).filter(|(_, &n)| n > 0).flat_map(|(c, _)| c.iter()).flatten()
+        self.chunks
+            .iter()
+            .zip(&self.live)
+            .filter(|(_, &n)| n > 0)
+            .flat_map(|(c, _)| c.iter())
+            .flatten()
     }
 
     pub fn values_mut(&mut self) -> impl Iterator<Item = &mut Record> {
-        self.chunks.iter_mut().zip(&self.live).filter(|(_, &n)| n > 0).flat_map(|(c, _)| c.iter_mut()).flatten()
+        self.chunks
+            .iter_mut()
+            .zip(&self.live)
+            .filter(|(_, &n)| n > 0)
+            .flat_map(|(c, _)| c.iter_mut())
+            .flatten()
     }
 
     pub fn clear(&mut self) {
@@ -383,10 +421,21 @@ pub enum Interrupt {
 pub enum Microtask {
     /// the closure, its named arguments (an array, or UNDEF) and the number of its positional
     /// ones, which wait in `Core::microtask_args` (in queue order: no allocation per microtask)
-    Php { closure: Zv, nargs: u32, named: Zv },
+    Php {
+        closure: Zv,
+        nargs: u32,
+        named: Zv,
+    },
     /// DriverSuspension::resume()/throw() of a fiber suspension
-    Resume { fiber: Zv, value: Zv, throw: bool },
-    Native { f: NativeFn, data: *mut c_void },
+    Resume {
+        fiber: Zv,
+        value: Zv,
+        throw: bool,
+    },
+    Native {
+        f: NativeFn,
+        data: *mut c_void,
+    },
 }
 
 /// The loop's place, so that it can return to `{main}` and continue later (Revolt suspends its
@@ -614,11 +663,17 @@ impl Core {
 
     /// Adds to $enableQueue (or $enableDeferQueue for defers).
     pub fn queue_enable(&mut self, c: Cid) {
-        let Some(r) = self.callbacks.at_id(c) else { return };
+        let Some(r) = self.callbacks.at_id(c) else {
+            return;
+        };
         r.queued = true;
         r.qgen = r.qgen.wrapping_add(1);
         let entry = (r.cid(), r.qgen);
-        let (q, len) = if r.kind == Kind::Defer { (&mut self.defer_queue, &mut self.defer_queue_len) } else { (&mut self.enable_queue, &mut self.enable_queue_len) };
+        let (q, len) = if r.kind == Kind::Defer {
+            (&mut self.defer_queue, &mut self.defer_queue_len)
+        } else {
+            (&mut self.enable_queue, &mut self.enable_queue_len)
+        };
         q.push(entry);
         *len += 1;
         if q.len() > 2 * *len + 32 {
@@ -646,7 +701,9 @@ impl Core {
 
     /// unset($this->enableQueue[$id]) / unset($this->enableDeferQueue[$id])
     pub fn unqueue_enable(&mut self, id: u64) -> bool {
-        let Some(r) = self.callbacks.get(id) else { return false };
+        let Some(r) = self.callbacks.get(id) else {
+            return false;
+        };
         Self::unqueue(r, &mut self.enable_queue_len, &mut self.defer_queue_len)
     }
 
@@ -654,7 +711,11 @@ impl Core {
     /// (marked not queued).
     pub fn take_queue(&mut self, defer: bool, out: &mut Vec<Cid>) {
         out.clear();
-        let q = if defer { &mut self.defer_queue } else { &mut self.enable_queue };
+        let q = if defer {
+            &mut self.defer_queue
+        } else {
+            &mut self.enable_queue
+        };
         if q.is_empty() {
             return;
         }

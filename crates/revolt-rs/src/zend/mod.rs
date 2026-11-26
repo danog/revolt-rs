@@ -47,10 +47,18 @@ pub fn cg() -> *mut sys::zend_compiler_globals {
 #[macro_export]
 macro_rules! zh {
     ($f:path) => {{
-        unsafe extern "vectorcall" fn shim(ex: *mut $crate::zend::sys::zend_execute_data, rv: *mut $crate::zend::sys::zval) {
+        unsafe extern "vectorcall" fn shim(
+            ex: *mut $crate::zend::sys::zend_execute_data,
+            rv: *mut $crate::zend::sys::zval,
+        ) {
             unsafe { $f(ex, rv) }
         }
-        Some(shim as unsafe extern "vectorcall" fn(*mut $crate::zend::sys::zend_execute_data, *mut $crate::zend::sys::zval))
+        Some(
+            shim as unsafe extern "vectorcall" fn(
+                *mut $crate::zend::sys::zend_execute_data,
+                *mut $crate::zend::sys::zval,
+            ),
+        )
     }};
 }
 
@@ -59,7 +67,12 @@ macro_rules! zh {
 #[macro_export]
 macro_rules! zh {
     ($f:path) => {
-        Some($f as unsafe extern "C" fn(*mut $crate::zend::sys::zend_execute_data, *mut $crate::zend::sys::zval))
+        Some(
+            $f as unsafe extern "C" fn(
+                *mut $crate::zend::sys::zend_execute_data,
+                *mut $crate::zend::sys::zval,
+            ),
+        )
     };
 }
 

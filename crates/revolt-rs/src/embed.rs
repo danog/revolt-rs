@@ -18,8 +18,10 @@
 //!   their string id); the API uses their numbers ("a" = 1).
 
 use crate::classes::{self, suspension};
+pub use crate::core::backend::{
+    SrcFd, SrcFlushFn, SrcTakeFn, READ as SRC_READ, WRITE as SRC_WRITE,
+};
 use crate::core::run::{self, D};
-pub use crate::core::backend::{SrcFd, SrcFlushFn, SrcTakeFn, READ as SRC_READ, WRITE as SRC_WRITE};
 use crate::core::{Cb, Microtask, NativeFn, ReleaseFn};
 use crate::zend::{call, stream::Handle, sys, zval, zval::Zv};
 use std::ffi::{c_char, c_void};
@@ -47,10 +49,33 @@ pub struct Abi {
     pub current: unsafe extern "C" fn() -> *mut sys::zend_object,
     /// onReadable/onWritable on an OS handle (an fd; a SOCKET on Windows when `socket`). The
     /// callback functions take `(f, data, release, held)`: see [`NativeLoop::delay`].
-    pub on_handle: unsafe extern "C" fn(*mut sys::zend_object, i64, bool, bool, NativeFn, *mut c_void, Option<ReleaseFn>, *mut sys::zend_object) -> u64,
+    pub on_handle: unsafe extern "C" fn(
+        *mut sys::zend_object,
+        i64,
+        bool,
+        bool,
+        NativeFn,
+        *mut c_void,
+        Option<ReleaseFn>,
+        *mut sys::zend_object,
+    ) -> u64,
     /// delay ($repeat false) / repeat; 0 with an exception when the interval is negative
-    pub timer: unsafe extern "C" fn(*mut sys::zend_object, f64, bool, NativeFn, *mut c_void, Option<ReleaseFn>, *mut sys::zend_object) -> u64,
-    pub defer: unsafe extern "C" fn(*mut sys::zend_object, NativeFn, *mut c_void, Option<ReleaseFn>, *mut sys::zend_object) -> u64,
+    pub timer: unsafe extern "C" fn(
+        *mut sys::zend_object,
+        f64,
+        bool,
+        NativeFn,
+        *mut c_void,
+        Option<ReleaseFn>,
+        *mut sys::zend_object,
+    ) -> u64,
+    pub defer: unsafe extern "C" fn(
+        *mut sys::zend_object,
+        NativeFn,
+        *mut c_void,
+        Option<ReleaseFn>,
+        *mut sys::zend_object,
+    ) -> u64,
     /// a microtask: `f(data, 0)` runs before any other callback (no release: run exactly once)
     pub queue: unsafe extern "C" fn(*mut sys::zend_object, NativeFn, *mut c_void),
     pub cancel: unsafe extern "C" fn(*mut sys::zend_object, u64),
@@ -74,7 +99,8 @@ pub struct Abi {
     pub unhold: unsafe extern "C" fn(),
     // ---- minor 1: sources (see EMBEDDING.md, "Sources")
     /// A new source group on the driver: its id (0: none, with an exception pending).
-    pub src_group: unsafe extern "C" fn(*mut sys::zend_object, SrcTakeFn, SrcFlushFn, *mut c_void) -> u32,
+    pub src_group:
+        unsafe extern "C" fn(*mut sys::zend_object, SrcTakeFn, SrcFlushFn, *mut c_void) -> u32,
     /// Closes a group (its sources are forgotten; unreferenced).
     pub src_close: unsafe extern "C" fn(*mut sys::zend_object, u32),
     /// References / unreferences a group: while referenced, the loop runs (as for a referenced
@@ -103,25 +129,71 @@ unsafe extern "C" fn abi_current() -> *mut sys::zend_object {
     classes::eventloop::driver()
 }
 
-unsafe fn native_cb(f: NativeFn, data: *mut c_void, release: Option<ReleaseFn>, held: *mut sys::zend_object) -> Cb {
-    let held = if held.is_null() { Zv::undef() } else { Zv(zval::obj_ref(held)) };
-    Cb::Native { f, data, release, held }
+unsafe fn native_cb(
+    f: NativeFn,
+    data: *mut c_void,
+    release: Option<ReleaseFn>,
+    held: *mut sys::zend_object,
+) -> Cb {
+    let held = if held.is_null() {
+        Zv::undef()
+    } else {
+        Zv(zval::obj_ref(held))
+    };
+    Cb::Native {
+        f,
+        data,
+        release,
+        held,
+    }
 }
 
-unsafe extern "C" fn abi_on_handle(d: *mut sys::zend_object, fd: i64, socket: bool, writable: bool, f: NativeFn, data: *mut c_void, release: Option<ReleaseFn>, held: *mut sys::zend_object) -> u64 {
-    run::stream_handle(D(d), Handle { fd, socket }, native_cb(f, data, release, held), writable)
+unsafe extern "C" fn abi_on_handle(
+    d: *mut sys::zend_object,
+    fd: i64,
+    socket: bool,
+    writable: bool,
+    f: NativeFn,
+    data: *mut c_void,
+    release: Option<ReleaseFn>,
+    held: *mut sys::zend_object,
+) -> u64 {
+    run::stream_handle(
+        D(d),
+        Handle { fd, socket },
+        native_cb(f, data, release, held),
+        writable,
+    )
 }
 
-unsafe extern "C" fn abi_timer(d: *mut sys::zend_object, secs: f64, repeat: bool, f: NativeFn, data: *mut c_void, release: Option<ReleaseFn>, held: *mut sys::zend_object) -> u64 {
+unsafe extern "C" fn abi_timer(
+    d: *mut sys::zend_object,
+    secs: f64,
+    repeat: bool,
+    f: NativeFn,
+    data: *mut c_void,
+    release: Option<ReleaseFn>,
+    held: *mut sys::zend_object,
+) -> u64 {
     if secs < 0.0 {
         drop(native_cb(f, data, release, held));
-        call::throw_error(if repeat { "Interval must be greater than or equal to zero" } else { "Delay must be greater than or equal to zero" });
+        call::throw_error(if repeat {
+            "Interval must be greater than or equal to zero"
+        } else {
+            "Delay must be greater than or equal to zero"
+        });
         return 0;
     }
     run::timer(D(d), secs, native_cb(f, data, release, held), repeat).unwrap_or(0)
 }
 
-unsafe extern "C" fn abi_defer(d: *mut sys::zend_object, f: NativeFn, data: *mut c_void, release: Option<ReleaseFn>, held: *mut sys::zend_object) -> u64 {
+unsafe extern "C" fn abi_defer(
+    d: *mut sys::zend_object,
+    f: NativeFn,
+    data: *mut c_void,
+    release: Option<ReleaseFn>,
+    held: *mut sys::zend_object,
+) -> u64 {
     run::defer(D(d), native_cb(f, data, release, held))
 }
 
@@ -163,7 +235,11 @@ unsafe extern "C" fn abi_suspend(s: *mut sys::zend_object, rv: *mut sys::zval) -
 }
 
 unsafe extern "C" fn abi_resume(s: *mut sys::zend_object, v: *mut sys::zval) -> bool {
-    let value = if v.is_null() { Zv::null() } else { Zv(zval::copy_deref(v)) };
+    let value = if v.is_null() {
+        Zv::null()
+    } else {
+        Zv(zval::copy_deref(v))
+    };
     suspension::wake(s, value, false);
     !call::has_exception()
 }
@@ -173,7 +249,12 @@ unsafe extern "C" fn abi_throw(s: *mut sys::zend_object, e: *mut sys::zend_objec
     !call::has_exception()
 }
 
-unsafe extern "C" fn abi_src_group(d: *mut sys::zend_object, take: SrcTakeFn, flush: SrcFlushFn, data: *mut c_void) -> u32 {
+unsafe extern "C" fn abi_src_group(
+    d: *mut sys::zend_object,
+    take: SrcTakeFn,
+    flush: SrcFlushFn,
+    data: *mut c_void,
+) -> u32 {
     D(d).c().reactor.src_group(take, flush, data)
 }
 
@@ -195,16 +276,35 @@ unsafe extern "C" fn abi_src_reference(d: *mut sys::zend_object, g: u32, on: boo
     }
 }
 
-unsafe extern "C" fn abi_src_arm(d: *mut sys::zend_object, g: u32, fds: *const SrcFd, n: usize, token: u64) -> i32 {
-    let fds = if n == 0 { &[][..] } else { std::slice::from_raw_parts(fds, n) };
+unsafe extern "C" fn abi_src_arm(
+    d: *mut sys::zend_object,
+    g: u32,
+    fds: *const SrcFd,
+    n: usize,
+    token: u64,
+) -> i32 {
+    let fds = if n == 0 {
+        &[][..]
+    } else {
+        std::slice::from_raw_parts(fds, n)
+    };
     match D(d).c().reactor.src_arm(g, fds, token) {
         Ok(hit) => hit as i32,
         Err(e) => -e.max(1),
     }
 }
 
-unsafe extern "C" fn abi_src_disarm(d: *mut sys::zend_object, fds: *const SrcFd, n: usize, token: u64) {
-    let fds = if n == 0 { &[][..] } else { std::slice::from_raw_parts(fds, n) };
+unsafe extern "C" fn abi_src_disarm(
+    d: *mut sys::zend_object,
+    fds: *const SrcFd,
+    n: usize,
+    token: u64,
+) {
+    let fds = if n == 0 {
+        &[][..]
+    } else {
+        std::slice::from_raw_parts(fds, n)
+    };
     D(d).c().reactor.src_disarm(fds, token)
 }
 
@@ -352,9 +452,17 @@ unsafe fn symbol_near(addr: *const c_void) -> Option<*const c_void> {
 
 #[cfg(windows)]
 unsafe fn symbol_near(addr: *const c_void) -> Option<*const c_void> {
-    use windows_sys::Win32::System::LibraryLoader::{GetModuleHandleExW, GetProcAddress, GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT};
+    use windows_sys::Win32::System::LibraryLoader::{
+        GetModuleHandleExW, GetProcAddress, GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
+        GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+    };
     let mut m = std::ptr::null_mut();
-    if GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, addr as *const u16, &mut m) == 0 {
+    if GetModuleHandleExW(
+        GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+        addr as *const u16,
+        &mut m,
+    ) == 0
+    {
         return None;
     }
     GetProcAddress(m, c"revolt_rs_abi_v1".as_ptr() as *const u8).map(|p| p as *const c_void)
@@ -388,11 +496,27 @@ impl NativeLoop {
 
     /// onReadable(): `cb(data, id)` while the OS handle (an fd; a SOCKET on Windows when
     /// `socket`) is readable. See [`NativeLoop::delay`] for the other arguments.
-    pub unsafe fn on_readable(&self, fd: i64, socket: bool, cb: NativeFn, data: *mut c_void, release: Option<ReleaseFn>, held: *mut sys::zend_object) -> u64 {
+    pub unsafe fn on_readable(
+        &self,
+        fd: i64,
+        socket: bool,
+        cb: NativeFn,
+        data: *mut c_void,
+        release: Option<ReleaseFn>,
+        held: *mut sys::zend_object,
+    ) -> u64 {
         (self.abi.on_handle)(self.driver, fd, socket, false, cb, data, release, held)
     }
 
-    pub unsafe fn on_writable(&self, fd: i64, socket: bool, cb: NativeFn, data: *mut c_void, release: Option<ReleaseFn>, held: *mut sys::zend_object) -> u64 {
+    pub unsafe fn on_writable(
+        &self,
+        fd: i64,
+        socket: bool,
+        cb: NativeFn,
+        data: *mut c_void,
+        release: Option<ReleaseFn>,
+        held: *mut sys::zend_object,
+    ) -> u64 {
         (self.abi.on_handle)(self.driver, fd, socket, true, cb, data, release, held)
     }
 
@@ -403,15 +527,35 @@ impl NativeLoop {
     /// resumes there (not a reference owned by `data`), so that a fiber waiting on a driver
     /// that became garbage is collected as with PHP closures. Returns the id (0 with an
     /// exception pending).
-    pub unsafe fn delay(&self, secs: f64, cb: NativeFn, data: *mut c_void, release: Option<ReleaseFn>, held: *mut sys::zend_object) -> u64 {
+    pub unsafe fn delay(
+        &self,
+        secs: f64,
+        cb: NativeFn,
+        data: *mut c_void,
+        release: Option<ReleaseFn>,
+        held: *mut sys::zend_object,
+    ) -> u64 {
         (self.abi.timer)(self.driver, secs, false, cb, data, release, held)
     }
 
-    pub unsafe fn repeat(&self, secs: f64, cb: NativeFn, data: *mut c_void, release: Option<ReleaseFn>, held: *mut sys::zend_object) -> u64 {
+    pub unsafe fn repeat(
+        &self,
+        secs: f64,
+        cb: NativeFn,
+        data: *mut c_void,
+        release: Option<ReleaseFn>,
+        held: *mut sys::zend_object,
+    ) -> u64 {
         (self.abi.timer)(self.driver, secs, true, cb, data, release, held)
     }
 
-    pub unsafe fn defer(&self, cb: NativeFn, data: *mut c_void, release: Option<ReleaseFn>, held: *mut sys::zend_object) -> u64 {
+    pub unsafe fn defer(
+        &self,
+        cb: NativeFn,
+        data: *mut c_void,
+        release: Option<ReleaseFn>,
+        held: *mut sys::zend_object,
+    ) -> u64 {
         (self.abi.defer)(self.driver, cb, data, release, held)
     }
 
@@ -516,7 +660,6 @@ impl NativeLoop {
         (self.abi.idle)(self.driver, except)
     }
 }
-
 
 /// The fallback: `Revolt\EventLoop`'s static methods through PHP (autoloaded if needed, so it
 /// works with the PHP library too).

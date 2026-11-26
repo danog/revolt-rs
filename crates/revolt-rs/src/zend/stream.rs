@@ -40,15 +40,26 @@ pub unsafe fn handle(z: *mut sys::zval) -> Option<Handle> {
     #[cfg(windows)]
     {
         let mut sock: usize = 0;
-        if sys::_php_stream_cast(s, AS_SOCKETD | CAST_INTERNAL, &mut sock as *mut usize as *mut *mut _, 0) == sys::ZEND_RESULT_CODE_SUCCESS {
-            return Some(Handle { fd: sock as i64, socket: true });
+        if sys::_php_stream_cast(
+            s,
+            AS_SOCKETD | CAST_INTERNAL,
+            &mut sock as *mut usize as *mut *mut _,
+            0,
+        ) == sys::ZEND_RESULT_CODE_SUCCESS
+        {
+            return Some(Handle {
+                fd: sock as i64,
+                socket: true,
+            });
         }
     }
     let mut fd: i64 = -1;
     // php_stream_cast writes a php_socket_t (int on Unix) or an int fd
     let mut raw: [u8; 8] = [0xff; 8];
     for how in [AS_FD_FOR_SELECT, AS_FD] {
-        if sys::_php_stream_cast(s, how | CAST_INTERNAL, raw.as_mut_ptr() as *mut *mut _, 0) == sys::ZEND_RESULT_CODE_SUCCESS {
+        if sys::_php_stream_cast(s, how | CAST_INTERNAL, raw.as_mut_ptr() as *mut *mut _, 0)
+            == sys::ZEND_RESULT_CODE_SUCCESS
+        {
             fd = i32::from_ne_bytes([raw[0], raw[1], raw[2], raw[3]]) as i64;
             break;
         }

@@ -97,7 +97,11 @@ unsafe extern "C" fn noop_release(_data: *mut c_void) {
 /// collector sees it, not through a reference of this frame: so a fiber suspended here whose
 /// driver became garbage is collected (its destruction unwinds this frame: `suspend` returns
 /// with the unwind exception, and the objects are still there for the cancel).
-unsafe fn native_wait(nl: NativeLoop, rv: *mut sys::zval, register: impl FnOnce(&NativeLoop, *mut c_void, *mut sys::zend_object) -> u64) {
+unsafe fn native_wait(
+    nl: NativeLoop,
+    rv: *mut sys::zval,
+    register: impl FnOnce(&NativeLoop, *mut c_void, *mut sys::zend_object) -> u64,
+) {
     let s = nl.suspension();
     if s.is_null() {
         return;
@@ -105,7 +109,10 @@ unsafe fn native_wait(nl: NativeLoop, rv: *mut sys::zval, register: impl FnOnce(
     nl.hold(s);
     let mut own = zval::obj_owned(s);
     zval::dtor(&mut own);
-    let data = Box::into_raw(Box::new(Wait { abi: nl.abi, suspension: s })) as *mut c_void;
+    let data = Box::into_raw(Box::new(Wait {
+        abi: nl.abi,
+        suspension: s,
+    })) as *mut c_void;
     let id = register(&nl, data, s);
     if id != 0 {
         let value = nl.suspend(s);
@@ -191,7 +198,9 @@ unsafe extern "C" fn fn_sleep(ex: *mut sys::zend_execute_data, rv: *mut sys::zva
         return;
     }
     match NativeLoop::current() {
-        Some(nl) => native_wait(nl, rv, |nl, data, s| nl.delay(secs, wait_fire, data, Some(wait_release), s)),
+        Some(nl) => native_wait(nl, rv, |nl, data, s| {
+            nl.delay(secs, wait_fire, data, Some(wait_release), s)
+        }),
         None if call::has_exception() => {}
         None => php_wait(rv, b"delay", vec![zval::double(secs)]),
     }
@@ -207,7 +216,9 @@ unsafe extern "C" fn fn_wait_readable(ex: *mut sys::zend_execute_data, rv: *mut 
         return;
     };
     match NativeLoop::current() {
-        Some(nl) => native_wait(nl, rv, |nl, data, s| nl.on_readable(h.fd, h.socket, wait_fire, data, Some(wait_release), s)),
+        Some(nl) => native_wait(nl, rv, |nl, data, s| {
+            nl.on_readable(h.fd, h.socket, wait_fire, data, Some(wait_release), s)
+        }),
         None if call::has_exception() => {}
         None => php_wait(rv, b"onreadable", vec![zval::copy(z)]),
     }
@@ -222,7 +233,13 @@ unsafe extern "C" fn fn_delay(ex: *mut sys::zend_execute_data, rv: *mut sys::zva
         zval::write(rv, zval::null());
         return;
     };
-    let id = nl.delay(secs, noop_fire, std::ptr::null_mut(), Some(noop_release), std::ptr::null_mut());
+    let id = nl.delay(
+        secs,
+        noop_fire,
+        std::ptr::null_mut(),
+        Some(noop_release),
+        std::ptr::null_mut(),
+    );
     if id != 0 {
         zval::write(rv, zval::string(&revolt_rs::core::id_to_string(id)));
     }
@@ -255,7 +272,9 @@ thread_local! {
 /// During the loop's poll: the wait `token` is resumed at the flush if it is still pending.
 unsafe extern "C" fn src_take(_data: *mut c_void, token: u64) -> bool {
     SRC.with_borrow_mut(|s| {
-        let Some(i) = s.waiting.iter().position(|w| w.0 == token) else { return false };
+        let Some(i) = s.waiting.iter().position(|w| w.0 == token) else {
+            return false;
+        };
         let (_, susp) = s.waiting.swap_remove(i);
         s.taken.push(susp);
         s.takes += 1;
@@ -305,7 +324,15 @@ unsafe extern "C" fn fn_src_wait(ex: *mut sys::zend_execute_data, rv: *mut sys::
     };
     let Some(nl) = NativeLoop::current() else {
         if !call::has_exception() {
-            php_wait(rv, if writable { b"onwritable" } else { b"onreadable" }, vec![zval::copy(z)]);
+            php_wait(
+                rv,
+                if writable {
+                    b"onwritable"
+                } else {
+                    b"onreadable"
+                },
+                vec![zval::copy(z)],
+            );
         }
         return;
     };
@@ -317,7 +344,14 @@ unsafe extern "C" fn fn_src_wait(ex: *mut sys::zend_execute_data, rv: *mut sys::
         s.next_token += 1;
         s.next_token
     });
-    let fds = [embed::SrcFd { fd: h.fd, events: if writable { embed::SRC_WRITE } else { embed::SRC_READ } as u32 }];
+    let fds = [embed::SrcFd {
+        fd: h.fd,
+        events: if writable {
+            embed::SRC_WRITE
+        } else {
+            embed::SRC_READ
+        } as u32,
+    }];
     match nl.src_arm(g, &fds, token) {
         Err(e) => {
             call::throw(sys::zend_ce_exception, &format!("src_arm: {e}"));
@@ -393,16 +427,69 @@ unsafe extern "C" fn fn_idle(ex: *mut sys::zend_execute_data, rv: *mut sys::zval
 fn functions() -> *const sys::zend_function_entry {
     let f = |name, handler, ret, args| -> Method { k::m(name, handler, 0, ret, args) };
     k::functions(vec![
-        f("revolt_embed_example_mode", revolt_rs::zh!(fn_mode), k::t(k::T_STRING), vec![]),
-        f("revolt_embed_example_owner", revolt_rs::zh!(fn_owner), k::t(k::T_BOOL), vec![]),
-        f("revolt_embed_example_sleep", revolt_rs::zh!(fn_sleep), k::t(k::T_MIXED), vec![a("seconds", k::t(k::T_FLOAT))]),
-        f("revolt_embed_example_wait_readable", revolt_rs::zh!(fn_wait_readable), k::t(k::T_MIXED), vec![a("stream", k::t(k::T_MIXED))]),
-        f("revolt_embed_example_delay", revolt_rs::zh!(fn_delay), k::t(k::T_STRING | k::T_NULL), vec![a("seconds", k::t(k::T_FLOAT))]),
-        f("revolt_embed_example_released", revolt_rs::zh!(fn_released), k::t(k::T_INT), vec![]),
-        f("revolt_embed_example_src_wait", revolt_rs::zh!(fn_src_wait), k::t(k::T_STRING), vec![a("stream", k::t(k::T_MIXED)), revolt_rs::zend::class::ad("writable", k::t(k::T_BOOL), "false")]),
-        f("revolt_embed_example_src_forget", revolt_rs::zh!(fn_src_forget), k::t(k::T_VOID), vec![a("stream", k::t(k::T_MIXED))]),
-        f("revolt_embed_example_src_stats", revolt_rs::zh!(fn_src_stats), k::t(k::T_ARRAY), vec![]),
-        f("revolt_embed_example_idle", revolt_rs::zh!(fn_idle), k::t(k::T_BOOL | k::T_NULL), vec![]),
+        f(
+            "revolt_embed_example_mode",
+            revolt_rs::zh!(fn_mode),
+            k::t(k::T_STRING),
+            vec![],
+        ),
+        f(
+            "revolt_embed_example_owner",
+            revolt_rs::zh!(fn_owner),
+            k::t(k::T_BOOL),
+            vec![],
+        ),
+        f(
+            "revolt_embed_example_sleep",
+            revolt_rs::zh!(fn_sleep),
+            k::t(k::T_MIXED),
+            vec![a("seconds", k::t(k::T_FLOAT))],
+        ),
+        f(
+            "revolt_embed_example_wait_readable",
+            revolt_rs::zh!(fn_wait_readable),
+            k::t(k::T_MIXED),
+            vec![a("stream", k::t(k::T_MIXED))],
+        ),
+        f(
+            "revolt_embed_example_delay",
+            revolt_rs::zh!(fn_delay),
+            k::t(k::T_STRING | k::T_NULL),
+            vec![a("seconds", k::t(k::T_FLOAT))],
+        ),
+        f(
+            "revolt_embed_example_released",
+            revolt_rs::zh!(fn_released),
+            k::t(k::T_INT),
+            vec![],
+        ),
+        f(
+            "revolt_embed_example_src_wait",
+            revolt_rs::zh!(fn_src_wait),
+            k::t(k::T_STRING),
+            vec![
+                a("stream", k::t(k::T_MIXED)),
+                revolt_rs::zend::class::ad("writable", k::t(k::T_BOOL), "false"),
+            ],
+        ),
+        f(
+            "revolt_embed_example_src_forget",
+            revolt_rs::zh!(fn_src_forget),
+            k::t(k::T_VOID),
+            vec![a("stream", k::t(k::T_MIXED))],
+        ),
+        f(
+            "revolt_embed_example_src_stats",
+            revolt_rs::zh!(fn_src_stats),
+            k::t(k::T_ARRAY),
+            vec![],
+        ),
+        f(
+            "revolt_embed_example_idle",
+            revolt_rs::zh!(fn_idle),
+            k::t(k::T_BOOL | k::T_NULL),
+            vec![],
+        ),
     ])
 }
 
@@ -415,7 +502,15 @@ static ENTRY: OnceLock<Entry> = OnceLock::new();
 #[no_mangle]
 pub extern "C" fn get_module() -> *mut sys::zend_module_entry {
     let e = ENTRY.get_or_init(|| {
-        let mut e = module::module_entry(c"revolt_embed_example", c"0.1.0", minit, mshutdown, rinit, rshutdown, minfo);
+        let mut e = module::module_entry(
+            c"revolt_embed_example",
+            c"0.1.0",
+            minit,
+            mshutdown,
+            rinit,
+            rshutdown,
+            minfo,
+        );
         e.functions = functions();
         Entry(e)
     });
